@@ -67,6 +67,14 @@ impl Gamestate {
             Vec::new()
         }
     }
+
+    pub fn make_turns(&mut self, turns: &[(u8, u8)]) -> bool {
+        for (x, y) in turns {
+            let flips = self.make_turn(*x, *y);
+            if flips.is_empty() { return false; }
+        }
+        true
+    }
 }
 
 pub fn str_to_loc(s: &str) -> Option<(u8, u8)> {

@@ -2,20 +2,28 @@ use std::cmp::Ordering;
 use std::io;
 
 use rand::prelude::IndexedRandom;
+use rand::rngs::ThreadRng;
 
 use crate::gameplay;
 
 pub trait Agent {
-    fn make_move(&self, state: &gameplay::Gamestate) -> (u8, u8);
+    fn make_move(&mut self, state: &gameplay::Gamestate) -> (u8, u8);
 }
 
-pub struct RandomAgent {}
+pub struct RandomAgent {
+    r: ThreadRng,
+}
+
+impl RandomAgent {
+    pub fn new() -> Self {
+        RandomAgent {r: rand::rng()}
+    }
+}
 
 impl Agent for RandomAgent {
-    fn make_move(&self, state: &gameplay::Gamestate) -> (u8, u8) {
-        let mut rng = rand::rng();
+    fn make_move(&mut self, state: &gameplay::Gamestate) -> (u8, u8) {
         state.get_moves()
-            .choose(&mut rng)
+            .choose(&mut self.r)
             .copied()
             .expect("There were no valid moves.")
     }
@@ -24,7 +32,7 @@ impl Agent for RandomAgent {
 pub struct GreedyAgent {}
 
 impl Agent for GreedyAgent {
-    fn make_move(&self, state: &gameplay::Gamestate) -> (u8, u8) {
+    fn make_move(&mut self, state: &gameplay::Gamestate) -> (u8, u8) {
         state.get_moves()
             .iter()
             .max_by(|(x1, y1), (x2, y2)| -> Ordering {
@@ -42,7 +50,7 @@ impl Agent for GreedyAgent {
 pub struct HumanAgent {}
 
 impl Agent for HumanAgent {
-    fn make_move(&self, state: &gameplay::Gamestate) -> (u8, u8) {
+    fn make_move(&mut self, state: &gameplay::Gamestate) -> (u8, u8) {
         let stdin = io::stdin();
         let mut input = String::new();
         let valid_moves = state.get_moves();
@@ -70,7 +78,7 @@ impl Agent for HumanAgent {
 pub struct HumanDebugger {}
 
 impl Agent for HumanDebugger {
-    fn make_move(&self, state: &gameplay::Gamestate) -> (u8, u8) {
+    fn make_move(&mut self, state: &gameplay::Gamestate) -> (u8, u8) {
         let stdin = io::stdin();
         let mut input = String::new();
         let valid_moves = state.get_moves();

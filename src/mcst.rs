@@ -1,17 +1,16 @@
 use std::collections::HashMap;
 use std::cmp::Ordering;
 
-use crate::agent::Agent;
-use crate::gameplay::{Players, Gamestate};
+use crate::agent::Agent; use crate::gameplay::{Players, Gamestate};
 
 pub trait SelectionPolicy {
-    fn select(&self, tree: &McstTree, game: &Gamestate) -> Vec<(u8, u8)>;
+    fn select(&mut self, tree: &McstTree, game: &Gamestate) -> Option<Vec<(u8, u8)>>;
 }
 pub trait ExpansionPolicy {
-    fn expand(&self, tree: &McstTree, path: &Vec<(u8, u8)>, game: &Gamestate) -> (u8, u8);
+    fn expand(&mut self, tree: &McstTree, path: &Vec<(u8, u8)>, game: &Gamestate) -> (u8, u8);
 }
 pub trait DecisionPolicy {
-    fn decide(&self, tree: &McstTree, game: &Gamestate) -> (u8, u8);
+    fn decide(&mut self, tree: &McstTree, game: &Gamestate) -> (u8, u8);
 }
 
 #[derive(Debug)]
@@ -35,20 +34,20 @@ impl McstNode {
         self.total += 1;
     }
 
-    fn search_mut(&self, path: &[(u8, u8)]) -> Option<&mut McstNode> {
+    fn search_mut(&mut self, path: &[(u8, u8)]) -> Option<&mut McstNode> {
         if let Some(child) = &path.first() {
-            if let Some(child) = self.children.get(child) {
+            if let Some(child) = self.children.get_mut(child) {
                 child.search_mut(&path[1..])
             } else { None }
-        } else { None }
+        } else { Some(self) }
     }
 
-    fn search(&self, path: &[(u8, u8)]) -> Option<&McstNode> {
+    pub fn search(&self, path: &[(u8, u8)]) -> Option<&McstNode> {
         if let Some(child) = &path.first() {
             if let Some(child) = self.children.get(child) {
                 child.search(&path[1..])
             } else { None }
-        } else { None }
+        } else { Some(&self) }
     }
 }
 
@@ -95,32 +94,38 @@ impl McstTree {
 pub struct McstAgent<
 S: SelectionPolicy,
 E: ExpansionPolicy,
+D: DecisionPolicy,
 R: Agent,
 > {
     selector: S,
     expander: E,
     rollout: R,
     opponent: R,
+    decider: D,
     tree: McstTree,
     game: crate::gameplay::Gamestate,
 }
 
+#[derive(Debug)]
 pub enum CycleError {
     Selection(SelectionError),
     Expansion(ExpansionError),
     Rollout(RolloutError),
 }
 
+#[derive(Debug)]
 pub enum SelectionError {
     NotANode(Vec<(u8, u8)>),  // gave us a path to a node we do not have
     NoExploration(Vec<(u8, u8)>),  // gave us a path to a node whose gamestate is terminal
 }
 
+#[derive(Debug)]
 pub enum ExpansionError {
     IllegalMove((u8, u8)),  // gave us an invalid move
     AlreadyExpanded((u8, u8)),  // expanded to a node we already have
 }
 
+#[derive(Debug)]
 pub enum RolloutError {
     IllegalMove(Vec<(u8, u8)>),
 }
@@ -128,11 +133,13 @@ pub enum RolloutError {
 impl<
 S: SelectionPolicy,
 E: ExpansionPolicy,
+D: DecisionPolicy,
 R: Agent,
-> McstAgent<S, E, R> {
+> McstAgent<S, E, D, R> {
     pub fn new(
         selector: S,
         expander: E,
+        decider: D,
         rollout: R,
         opponent: R,
         max_nodes: u32,
@@ -140,6 +147,7 @@ R: Agent,
         McstAgent {
             selector: selector,
             expander: expander,
+            decider: decider,
             rollout: rollout,
             opponent: opponent,
             tree: McstTree::new(max_nodes),
@@ -147,31 +155,36 @@ R: Agent,
         }
     }
 
-    fn view_game(&self) -> &Gamestate {
+    pub fn view_game(&self) -> &Gamestate {
         &self.game
     }
 
+    pub fn view_tree(&self) -> &McstTree {
+        &self.tree
+    }
+
     // Ok value is guaranteed to be a node
-    fn select(&self) -> Result<Vec<(u8, u8)>, SelectionError> {
-        let path = self.selector.select(&self.tree, &self.game);
-        if let Some(_) = &self.tree.root.search(&path) {
-            let selected_game = self.game_from_path(&path);
-            if selected_game.get_moves().is_empty() {
-                Err(SelectionError::NoExploration(path))
-            } else {
-                Ok(path)
-            }
-        } else { Err(SelectionError::NotANode(path)) }
+    fn select(&mut self) -> Result<Option<Vec<(u8, u8)>>, SelectionError> {
+        if let Some(path) = self.selector.select(&self.tree, &self.game) {
+            if let Some(_) = &self.tree.root.search(&path) {
+                let selected_game = self.game_from_path(&path);
+                if selected_game.get_moves().is_empty() {
+                    Err(SelectionError::NoExploration(path))
+                } else {
+                    Ok(Some(path))
+                }
+            } else { Err(SelectionError::NotANode(path)) }
+        } else { Ok(None) }
     }
 
     // path *must* refer to a valid node - will panic otherwise
     // Ok value guaranteed to return an unexpanded node
-    fn expand(&self, path: &Vec<(u8, u8)>) -> Result<Option<(u8, u8)>, ExpansionError> {
+    fn expand(&mut self, path: &Vec<(u8, u8)>) -> Result<Option<(u8, u8)>, ExpansionError> {
         let game = self.game_from_path(path);
         let link = self.expander.expand(&self.tree, path, &self.game);
         if game.get_moves().contains(&link) {
             if self.node_from_path(&path)
-                .children
+                    .children
                     .contains_key(&link) {
                         Err(ExpansionError::AlreadyExpanded(link))
                     } else {
@@ -182,7 +195,7 @@ R: Agent,
         }
     }
 
-    fn rollout(&self, path: &Vec<(u8, u8)>, mut my_turn: bool) -> Result<bool, RolloutError> {
+    fn rollout(&mut self, path: &Vec<(u8, u8)>, mut my_turn: bool) -> Result<bool, RolloutError> {
         let mut game = self.game_from_path(path);
         let mut move_history: Vec<(u8, u8)> = Vec::new();
         let my_color = if my_turn {
@@ -216,11 +229,13 @@ R: Agent,
         }
     }
 
-    fn cycle(&mut self) -> Result<(), CycleError> {
+    // the bool here says whether the selector decided this cycle was worth completing
+    pub fn cycle(&mut self) -> Result<bool, CycleError> {
         let path = self.select();
         let mut path = match path {
             Err(e) => return Err(CycleError::Selection(e)),
-            Ok(path) => path,
+            Ok(Some(path)) => path,
+            Ok(None) => return Ok(false),
         };
 
         match self.expand(&path) {
@@ -239,14 +254,26 @@ R: Agent,
             Ok(win) => win,
         };
 
-        self.node_from_path_mut(&path)
-            .update(win);
+        // TODO: this has to update all of them!!!
+        for index in 0..path.len() {
+            self.node_from_path_mut(&path[..index])
+                .update(win);
+        }
 
-        Ok(())
+        Ok(true)
+    }
+
+    pub fn decide(&mut self) -> Option<(u8, u8)> {
+        let decision = self.decider.decide(&self.tree, &self.game);
+        if self.game.get_moves().contains(&decision) {
+            Some(decision)
+        } else {
+            None
+        }
     }
 
     // path must point to a valid node, will panic otherwise
-    fn node_from_path_mut(&self, path: &Vec<(u8, u8)>) -> &mut McstNode {
+    fn node_from_path_mut(&mut self, path: &[(u8, u8)]) -> &mut McstNode {
         self.tree
             .root
             .search_mut(&path)
