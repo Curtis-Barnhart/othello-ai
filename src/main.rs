@@ -365,17 +365,17 @@ pub mod mcst {
     use std::cell::RefCell;
     use std::rc::{Rc, Weak};
     use std::cmp::Ordering;
+    use crate::agent::Agent;
+    use crate::gameplay::{Players, Gamestate};
 
     pub trait SelectionPolicy {
-        fn select(&self, tree: &McstTree) -> Vec<(u8, u8)>;
+        fn select(&self, tree: &McstTree, game: &Gamestate) -> Vec<(u8, u8)>;
     }
     pub trait ExpansionPolicy {
-        fn expand(&self, tree: &McstTree, path: &Vec<(u8, u8)>) -> Option<(u8, u8)>;
+        fn expand(&self, tree: &McstTree, path: &Vec<(u8, u8)>, game: &Gamestate) -> Option<(u8, u8)>;
     }
-    use crate::agent::Agent;
-    use crate::gameplay::Players;
     pub trait DecisionPolicy {
-        fn decide(&self, tree: &McstTree) -> (u8, u8);
+        fn decide(&self, tree: &McstTree, game: &Gamestate) -> (u8, u8);
     }
 
     #[derive(Debug)]
@@ -433,7 +433,7 @@ pub mod mcst {
         }
 
         pub fn node_usage(&self) -> u32 {
-            self.max_nodes - self.used_nodes 
+            self.max_nodes - self.used_nodes
         }
 
         // TODO: maybe make this return an error instead?
@@ -507,9 +507,13 @@ pub mod mcst {
             }
         }
 
+        fn view_game(&self) -> &Gamestate {
+            &self.game
+        }
+
         // Ok value is guaranteed to be a node
         fn select(&self) -> Result<Vec<(u8, u8)>, SelectionError> {
-            let path = self.selector.select(&self.tree);
+            let path = self.selector.select(&self.tree, &self.game);
             if let Some(_) = &self.tree.root.borrow().search(&path) {
                 let selected_game = self.game_from_path(&path);
                 if selected_game.get_moves().is_empty() {
@@ -524,18 +528,14 @@ pub mod mcst {
         // Ok value guaranteed to return an unexpanded node
         fn expand(&self, path: &Vec<(u8, u8)>) -> Result<Option<(u8, u8)>, ExpansionError> {
             let game = self.game_from_path(path);
-            if let Some(link) = self.expander.expand(&self.tree, path) {
+            if let Some(link) = self.expander.expand(&self.tree, path, &self.game) {
                 if game.get_moves().contains(&link) {
                     Ok(Some(link))
                 } else {
                     Err(ExpansionError::IllegalMove(link))
                 }
             } else {
-                let child_ct = self.tree
-                                   .root
-                                   .borrow()
-                                   .search(path)
-                                   .expect("invalid path")
+                let child_ct = self.node_from_path(path)
                                    .borrow()
                                    .children
                                    .len();
@@ -591,13 +591,9 @@ pub mod mcst {
             match self.expand(&path) {
                 Err(e) => return Err(CycleError::Expansion(e)),
                 Ok(Some(expansion)) => {
-                    let parent = self.tree
-                                     .root
-                                     .borrow()
-                                     .search(&path)
-                                     .expect("Selection path was invalid");
+                    let parent = self.node_from_path(&path);
                     self.tree
-                        .add_child( parent, expansion)
+                        .add_child(parent, expansion)
                         .expect("Failed to add child from expansion");
                     path.push(expansion);
                 },
@@ -609,19 +605,23 @@ pub mod mcst {
                 Ok(win) => win,
             };
 
-            self.tree
-                .root
-                .borrow()
-                .search(&path)
-                .expect("Could not find rollout root after rollout")
+            self.node_from_path(&path)
                 .borrow_mut()
                 .update(win);
 
             Ok(())
         }
 
-        // this must only ever be called on valid paths - i.e. those
-        // which have corresponding nodes in the mcst
+        // path must point to a valid node, will panic otherwise
+        fn node_from_path(&self, path: &Vec<(u8, u8)>) -> Rc<RefCell<McstNode>> {
+            self.tree
+                .root
+                .borrow()
+                .search(&path)
+                .expect("Node from path given invalid path")
+        }
+
+        // this can only be called when path consists of valid moves
         fn game_from_path(&self, path: &Vec<(u8, u8)>) -> crate::gameplay::Gamestate {
             let mut demo = self.game.clone();
             for (x, y) in path {
@@ -636,6 +636,9 @@ pub mod mcst {
 }
 
 use crate::agent::Agent;
+use crate::mcst::{SelectionPolicy, ExpansionPolicy, DecisionPolicy};
+
+struct BasicSelection {}
 
 fn main() {
     let t = mcst::McstTree::new(6);
