@@ -362,8 +362,6 @@ pub mod agent {
 
 pub mod mcst {
     use std::collections::HashMap;
-    use std::cell::RefCell;
-    use std::rc::{Rc, Weak};
     use std::cmp::Ordering;
     use crate::agent::Agent;
     use crate::gameplay::{Players, Gamestate};
@@ -372,7 +370,7 @@ pub mod mcst {
         fn select(&self, tree: &McstTree, game: &Gamestate) -> Vec<(u8, u8)>;
     }
     pub trait ExpansionPolicy {
-        fn expand(&self, tree: &McstTree, path: &Vec<(u8, u8)>, game: &Gamestate) -> Option<(u8, u8)>;
+        fn expand(&self, tree: &McstTree, path: &Vec<(u8, u8)>, game: &Gamestate) -> (u8, u8);
     }
     pub trait DecisionPolicy {
         fn decide(&self, tree: &McstTree, game: &Gamestate) -> (u8, u8);
@@ -380,16 +378,14 @@ pub mod mcst {
 
     #[derive(Debug)]
     pub struct McstNode {
-        parent: Option<Weak<RefCell<McstNode>>>,
-        children: HashMap<(u8, u8), Rc<RefCell<McstNode>>>,
-        wins: u32,
-        total: u32,
+        pub children: HashMap<(u8, u8), McstNode>,
+        pub wins: u32,
+        pub total: u32,
     }
 
     impl McstNode {
         fn new() -> Self {
             McstNode {
-                parent: None,
                 children: HashMap::new(),
                 wins: 0,
                 total: 0,
@@ -399,18 +395,20 @@ pub mod mcst {
         fn update(&mut self, win: bool) {
             if win { self.wins += 1 };
             self.total += 1;
-            if let Some(parent_ref) = &self.parent {
-                parent_ref.upgrade()
-                          .expect("Parent ref is dangling!")
-                          .borrow_mut()
-                          .update(win);
-            }
         }
 
-        fn search(&self, path: &[(u8, u8)]) -> Option<Rc<RefCell<McstNode>>> {
+        fn search_mut(&self, path: &[(u8, u8)]) -> Option<&mut McstNode> {
             if let Some(child) = &path.first() {
                 if let Some(child) = self.children.get(child) {
-                    child.borrow().search(&path[1..])
+                    child.search_mut(&path[1..])
+                } else { None }
+            } else { None }
+        }
+
+        fn search(&self, path: &[(u8, u8)]) -> Option<&McstNode> {
+            if let Some(child) = &path.first() {
+                if let Some(child) = self.children.get(child) {
+                    child.search(&path[1..])
                 } else { None }
             } else { None }
         }
@@ -418,15 +416,15 @@ pub mod mcst {
 
     #[derive(Debug)]
     pub struct McstTree {
-        root: Rc<RefCell<McstNode>>,
-        max_nodes: u32,
-        used_nodes: u32,
+        pub root: McstNode,
+        pub max_nodes: u32,
+        pub used_nodes: u32,
     }
 
     impl McstTree {
         pub fn new(max_nodes: u32) -> Self {
             McstTree {
-                root: Rc::new(RefCell::new(McstNode::new())),
+                root: McstNode::new(),
                 max_nodes: max_nodes,
                 used_nodes: 0,
             }
@@ -436,17 +434,22 @@ pub mod mcst {
             self.max_nodes - self.used_nodes
         }
 
-        // TODO: maybe make this return an error instead?
-        pub fn add_child(&mut self, old: Rc<RefCell<McstNode>>, link: (u8, u8)) -> Option<Rc<RefCell<McstNode>>> {
-            if old.borrow().children.contains_key(&link) || (self.used_nodes == self.max_nodes) {
-                None
+        // Hmm... what we return is odd. We could return an error to distinguish
+        // between running out of nodes and having an invalid path.
+        // We could also use lifetimes to return an actual reference to the child
+        // I think. Not sure if there's a benefit to that yet though.
+        pub fn add_child(&mut self, path: &[(u8, u8)], link: (u8, u8)) -> Option<()> {
+            if let Some(old) = self.root.search_mut(path) {
+                if old.children.contains_key(&link) || (self.used_nodes == self.max_nodes) {
+                    None
+                } else {
+                    self.used_nodes += 1;
+                    let new_child = McstNode::new();
+                    old.children.insert(link, new_child);
+                    Some(())
+                }
             } else {
-                self.used_nodes += 1;
-                let mut new_child = McstNode::new();
-                new_child.parent = Some(Rc::downgrade(&old));
-                let new_child = Rc::new(RefCell::new(new_child));
-                old.borrow_mut().children.insert(link, new_child.clone());
-                Some(new_child)
+                None
             }
         }
     }
@@ -471,14 +474,13 @@ pub mod mcst {
     }
 
     pub enum SelectionError {
-        NotANode(Vec<(u8, u8)>),
-        NoExploration(Vec<(u8, u8)>),
+        NotANode(Vec<(u8, u8)>),  // gave us a path to a node we do not have
+        NoExploration(Vec<(u8, u8)>),  // gave us a path to a node whose gamestate is terminal
     }
 
     pub enum ExpansionError {
-        IllegalMove((u8, u8)),
-        AlreadyExpanded((u8, u8)),
-        NeglectedBranch,
+        IllegalMove((u8, u8)),  // gave us an invalid move
+        AlreadyExpanded((u8, u8)),  // expanded to a node we already have
     }
 
     pub enum RolloutError {
@@ -514,7 +516,7 @@ pub mod mcst {
         // Ok value is guaranteed to be a node
         fn select(&self) -> Result<Vec<(u8, u8)>, SelectionError> {
             let path = self.selector.select(&self.tree, &self.game);
-            if let Some(_) = &self.tree.root.borrow().search(&path) {
+            if let Some(_) = &self.tree.root.search(&path) {
                 let selected_game = self.game_from_path(&path);
                 if selected_game.get_moves().is_empty() {
                     Err(SelectionError::NoExploration(path))
@@ -528,22 +530,17 @@ pub mod mcst {
         // Ok value guaranteed to return an unexpanded node
         fn expand(&self, path: &Vec<(u8, u8)>) -> Result<Option<(u8, u8)>, ExpansionError> {
             let game = self.game_from_path(path);
-            if let Some(link) = self.expander.expand(&self.tree, path, &self.game) {
-                if game.get_moves().contains(&link) {
-                    Ok(Some(link))
+            let link = self.expander.expand(&self.tree, path, &self.game);
+            if game.get_moves().contains(&link) {
+                if self.node_from_path(&path)
+                       .children
+                       .contains_key(&link) {
+                    Err(ExpansionError::AlreadyExpanded(link))
                 } else {
-                    Err(ExpansionError::IllegalMove(link))
+                    Ok(Some(link))
                 }
             } else {
-                let child_ct = self.node_from_path(path)
-                                   .borrow()
-                                   .children
-                                   .len();
-                if child_ct > 0 {
-                    Err(ExpansionError::NeglectedBranch)
-                } else {
-                    Ok(None)
-                }
+                Err(ExpansionError::IllegalMove(link))
             }
         }
 
@@ -591,9 +588,8 @@ pub mod mcst {
             match self.expand(&path) {
                 Err(e) => return Err(CycleError::Expansion(e)),
                 Ok(Some(expansion)) => {
-                    let parent = self.node_from_path(&path);
                     self.tree
-                        .add_child(parent, expansion)
+                        .add_child(&path, expansion)
                         .expect("Failed to add child from expansion");
                     path.push(expansion);
                 },
@@ -605,18 +601,24 @@ pub mod mcst {
                 Ok(win) => win,
             };
 
-            self.node_from_path(&path)
-                .borrow_mut()
+            self.node_from_path_mut(&path)
                 .update(win);
 
             Ok(())
         }
 
         // path must point to a valid node, will panic otherwise
-        fn node_from_path(&self, path: &Vec<(u8, u8)>) -> Rc<RefCell<McstNode>> {
+        fn node_from_path_mut(&self, path: &Vec<(u8, u8)>) -> &mut McstNode {
             self.tree
                 .root
-                .borrow()
+                .search_mut(&path)
+                .expect("Node from path given invalid path")
+        }
+
+        // path must point to a valid node, will panic otherwise
+        fn node_from_path(&self, path: &Vec<(u8, u8)>) -> &McstNode {
+            self.tree
+                .root
                 .search(&path)
                 .expect("Node from path given invalid path")
         }
