@@ -5,6 +5,7 @@ use crate::agent::Agent; use crate::gameplay::{Players, Gamestate};
 
 pub trait SelectionPolicy {
     fn select(&mut self, tree: &McstTree, game: &Gamestate) -> Option<Vec<(u8, u8)>>;
+    fn turns_passed(&mut self, tree: &McstTree, game: &Gamestate, turns: ((u8, u8), (u8, u8))) {}
 }
 pub trait ExpansionPolicy {
     fn expand(&mut self, tree: &McstTree, path: &Vec<(u8, u8)>, game: &Gamestate) -> (u8, u8);
@@ -54,21 +55,15 @@ impl McstNode {
 #[derive(Debug)]
 pub struct McstTree {
     pub root: McstNode,
-    pub max_nodes: u32,
-    pub used_nodes: u32,
+//    pub max_nodes: u32,
+//    pub used_nodes: u32,
 }
 
 impl McstTree {
     pub fn new(max_nodes: u32) -> Self {
         McstTree {
             root: McstNode::new(),
-            max_nodes: max_nodes,
-            used_nodes: 0,
         }
-    }
-
-    pub fn node_usage(&self) -> u32 {
-        self.max_nodes - self.used_nodes
     }
 
     // Hmm... what we return is odd. We could return an error to distinguish
@@ -77,10 +72,9 @@ impl McstTree {
     // I think. Not sure if there's a benefit to that yet though.
     pub fn add_child(&mut self, path: &[(u8, u8)], link: (u8, u8)) -> Option<()> {
         if let Some(old) = self.root.search_mut(path) {
-            if old.children.contains_key(&link) || (self.used_nodes == self.max_nodes) {
+            if old.children.contains_key(&link) {
                 None
             } else {
-                self.used_nodes += 1;
                 let new_child = McstNode::new();
                 old.children.insert(link, new_child);
                 Some(())
@@ -92,10 +86,10 @@ impl McstTree {
 }
 
 pub struct McstAgent<
-S: SelectionPolicy,
-E: ExpansionPolicy,
-D: DecisionPolicy,
-R: Agent,
+    S: SelectionPolicy,
+    E: ExpansionPolicy,
+    D: DecisionPolicy,
+    R: Agent,
 > {
     selector: S,
     expander: E,
@@ -103,7 +97,8 @@ R: Agent,
     opponent: R,
     decider: D,
     tree: McstTree,
-    game: crate::gameplay::Gamestate,
+    // TODO: fix this so there's a way to set the first game
+    pub game: crate::gameplay::Gamestate,
 }
 
 #[derive(Debug)]
@@ -235,7 +230,7 @@ R: Agent,
         let mut path = match path {
             Err(e) => return Err(CycleError::Selection(e)),
             Ok(Some(path)) => path,
-            Ok(None) => return Ok(false),
+            Ok(Option::None) => return Ok(false),
         };
 
         match self.expand(&path) {
@@ -254,7 +249,6 @@ R: Agent,
             Ok(win) => win,
         };
 
-        // TODO: this has to update all of them!!!
         for index in 0..path.len() {
             self.node_from_path_mut(&path[..index])
                 .update(win);
@@ -298,5 +292,34 @@ R: Agent,
             }
         }
         demo
+    }
+
+    pub fn next_two_moves(&mut self, mv1: (u8, u8), mv2: (u8, u8)) -> bool {
+        let mut test_game = self.game.clone();
+        if !test_game.make_turns(&[mv1, mv2]) {
+            false
+        } else {
+            self.game.make_turns(&[mv1, mv2]);
+            if !self.tree.root.children.contains_key(&mv1) {
+                if let Option::None = self.tree.add_child(&[], mv1) {
+                    panic!("");
+                }
+            }
+            if !self.tree.root.children.get(&mv1).unwrap().children.contains_key(&mv2) {
+                self.tree.add_child(&[mv1], mv2);
+            }
+            self.tree.root = self.tree
+                                 .root
+                                 .children
+                                 .get_mut(&mv1)
+                                 .unwrap()
+                                 .children
+                                 .remove(&mv2)
+                                 .unwrap();
+
+            self.selector.turns_passed(&self.tree, &self.game, (mv1, mv2));
+
+            true
+        }
     }
 }
