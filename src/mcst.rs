@@ -32,6 +32,10 @@ impl McstNode {
         }
     }
 
+    pub fn game(&self) -> &Gamestate {
+        &self.game
+    }
+
     pub fn wins(&self) -> &u32 {
         &self.wins
     }
@@ -178,9 +182,8 @@ R: Agent,
 
     fn select(&mut self) -> Result<Option<Vec<Turn>>, SelectionError> {
         if let Some(path) = self.selector.select(&self.tree, &self.game) {
-            if let Some(_) = &self.tree.root.search(&path) {
-                let selected_game = self.game_from_path(&path);
-                if selected_game.gen_moves().is_empty() {
+            if let Some(node) = &self.tree.root.search(&path) {
+                if node.game().get_moves().is_empty() {
                     Err(SelectionError::NoExploration(path))
                 } else {
                     Ok(Some(path))
@@ -192,15 +195,13 @@ R: Agent,
     // path *must* refer to a valid node - will panic otherwise
     // Ok value guaranteed to return an unexpanded node
     fn expand(&mut self, path: &Vec<Turn>) -> Result<Turn, ExpansionError> {
-        let game = self.game_from_path(path);
         let link = self.expander.expand(&self.tree, path, &self.game);
-        if game.gen_moves().contains(&link) {
-            if self.node_from_path(path)
-                    .children
-                    .contains_key(&link) {
-                        Err(ExpansionError::AlreadyExpanded(link))
-                    } else {
-                        Ok(link)
+        let node = self.node_from_path(path);
+        if node.game().get_moves().contains(&link) {
+            if node.children.contains_key(&link) {
+                Err(ExpansionError::AlreadyExpanded(link))
+            } else {
+                Ok(link)
             }
         } else {
             Err(ExpansionError::IllegalMove(link))
@@ -208,7 +209,7 @@ R: Agent,
     }
 
     fn rollout(&mut self, path: &Vec<Turn>, mut my_turn: bool) -> Result<bool, RolloutError> {
-        let mut game = self.game_from_path(path);
+        let mut game = self.node_from_path(path).game().clone();
         // TODO: optimize by removing move_history?
         let mut move_history: Vec<Turn> = Vec::new();
         let my_color = match self.game.whose_turn() {
@@ -217,7 +218,7 @@ R: Agent,
         };
 
         loop {
-            let valid_moves = game.gen_moves();
+            let valid_moves = game.get_moves();
             if !valid_moves.is_empty() {
                 let player_move = if my_turn {
                     self.rollout.make_move(&game)
@@ -275,7 +276,7 @@ R: Agent,
     // returns none if turn is not valid
     pub fn decide(&mut self) -> Option<Turn> {
         let decision = self.decider.decide(&self.tree, &self.game);
-        if self.game.gen_moves().contains(&decision) {
+        if self.game.get_moves().contains(&decision) {
             Some(decision)
         } else {
             None
@@ -296,15 +297,6 @@ R: Agent,
             .root
             .search(path)
             .expect("Node from path given invalid path")
-    }
-
-    // this can only be called when path consists of valid moves
-    fn game_from_path(&self, path: &Vec<Turn>) -> Gamestate {
-        let mut demo = self.game.clone();
-        if demo.make_moves_fast(path) {
-            return demo;
-        }
-        panic!("Path was invalid");
     }
 
     pub fn next_two_moves(&mut self, mv1: Turn, mv2: Turn) -> bool {

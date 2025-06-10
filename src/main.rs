@@ -31,18 +31,21 @@ impl SelectionPolicy for BfsSelectionFast {
     fn select(&mut self, tree: &McstTree, game: &Gamestate) -> Option<Vec<Turn>> {
         loop {
             if let Some(path) = self.queue.pop_front() {
-                let mut current_game = game.clone();
-                current_game.make_moves_fast(&path);
-                let current_moves = current_game.gen_moves();
+                let current_moves = tree.root()
+                                        .search(&path)
+                                        .unwrap()
+                                        .game()
+                                        .get_moves();
 
                 if !current_moves.is_empty() {
                     // there are moves to make
                     let move_ct = current_moves.len();
                     if move_ct - tree.root().search(&path).unwrap().children().len() == 0 {
                         // we have already been here... put in the children and try again
-                        for m in current_moves {
+                        // TODO: also find out if there is a way that doesn't need &*
+                        for m in &*current_moves {
                             let mut next_path = path.clone();
-                            next_path.push(m);
+                            next_path.push(*m);
                             self.queue.push_back(next_path);
                         }
                     } else {
@@ -66,15 +69,10 @@ struct BfsExpansion {}
 
 impl ExpansionPolicy for BfsExpansion {
     fn expand(&mut self, tree: &McstTree, path: &Vec<Turn>, game: &Gamestate) -> Turn {
-        let mut new_game = game.clone();
-        new_game.make_moves_fast(path);
-        for next_turn in new_game.gen_moves() {
-            if !tree.root()
-                    .search(path)
-                    .expect("Invalid path given for expansion")
-                    .children()
-                    .contains_key(&next_turn) {
-                return next_turn;
+        let node = tree.root().search(&path).unwrap();
+        for next_turn in &*node.game().get_moves() {
+            if !node.children().contains_key(&next_turn) {
+                return *next_turn;
             }
         }
         panic!("No nodes to expand on given path {:?}", path);
@@ -178,7 +176,7 @@ fn play_mcst() {
 
     loop {
         println!("{}", g);
-        let valid_moves = g.gen_moves();
+        let valid_moves = g.get_moves();
         if valid_moves.is_empty() {
             println!("Game over - score: {}", g.score());
             break;
@@ -207,7 +205,7 @@ fn play_a_game() {
     let mut human = agent::HumanDebugger {};
 
     loop {
-        let valid_moves = g.gen_moves();
+        let valid_moves = g.get_moves();
         if valid_moves.is_empty() {
             println!("Game over - score: {}", g.score());
             break;

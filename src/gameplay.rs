@@ -6,6 +6,7 @@ pub use crate::mechanics::{Players, States, Board};
 
 pub type Turn = Option<(u8, u8)>;
 
+// TODO: hey make it so that when it clones it keeps the turn list
 #[derive(Clone)]
 pub struct Gamestate {
     board: Board,
