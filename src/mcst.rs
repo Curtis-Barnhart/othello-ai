@@ -56,8 +56,6 @@ impl McstNode {
 #[derive(Debug)]
 pub struct McstTree {
     pub root: McstNode,
-//    pub max_nodes: u32,
-//    pub used_nodes: u32,
 }
 
 impl McstTree {
