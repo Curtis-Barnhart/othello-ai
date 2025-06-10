@@ -5,7 +5,7 @@ pub mod mcst;
 
 use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::io::{stdout, Write};
+use std::io::{stdout, stdin, Write};
 use std::time::Instant;
 
 use mcst::McstAgent;

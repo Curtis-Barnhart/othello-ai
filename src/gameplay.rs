@@ -86,7 +86,7 @@ impl Gamestate {
 
     pub fn valid_move(&self, m: Turn) -> bool {
         if let States::Taken(_) = self.whose_turn() {
-            self.gen_moves().contains(&m)
+            self.get_moves().contains(&m)
         } else {
             false
         }
@@ -113,7 +113,7 @@ impl Gamestate {
     // Returns None if the game is over
     pub fn make_move(&mut self, turn: Turn) -> Option<Vec<(u8, u8)>> {
         if let States::Taken(whose_turn) = self.whose_turn() {
-            if self.gen_moves().contains(&turn) {
+            if self.get_moves().contains(&turn) {
                 self.turn += 1;
                 *self.moves.borrow_mut() = None;
                 if let Some((x, y)) = turn {
@@ -129,7 +129,7 @@ impl Gamestate {
     // Returns None if the game is over
     pub fn make_move_fast(&mut self, turn: Turn) -> bool {
         if let States::Taken(whose_turn) = self.whose_turn() {
-            if self.gen_moves().contains(&turn) {
+            if self.get_moves().contains(&turn) {
                 self.turn += 1;
                 if let Some((x, y)) = turn {
                     self.board.change(x, y, States::Taken(whose_turn));

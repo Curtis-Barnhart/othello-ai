@@ -265,7 +265,7 @@ R: Agent,
             Ok(win) => win,
         };
 
-        for index in 0..path.len() {
+        for index in 0..=path.len() {
             self.node_from_path_mut(&path[..index])
                 .update(win);
         }
