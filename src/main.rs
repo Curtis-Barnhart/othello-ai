@@ -38,7 +38,7 @@ impl SelectionPolicy for BfsSelectionFast {
                 if !current_moves.is_empty() {
                     // there are moves to make
                     let move_ct = current_moves.len();
-                    if move_ct - tree.root.search(&path).unwrap().children.len() == 0 {
+                    if move_ct - tree.root().search(&path).unwrap().children().len() == 0 {
                         // we have already been here... put in the children and try again
                         for m in current_moves {
                             let mut next_path = path.clone();
@@ -69,10 +69,10 @@ impl ExpansionPolicy for BfsExpansion {
         let mut new_game = game.clone();
         new_game.make_moves_fast(path);
         for next_turn in new_game.gen_moves() {
-            if !tree.root
+            if !tree.root()
                     .search(path)
                     .expect("Invalid path given for expansion")
-                    .children
+                    .children()
                     .contains_key(&next_turn) {
                 return next_turn;
             }
@@ -85,16 +85,16 @@ struct SimpleDecision {}
 
 impl DecisionPolicy for SimpleDecision {
     fn decide(&mut self, tree: &McstTree, game: &Gamestate) -> Turn {
-        tree.root.children.keys().max_by(
+        tree.root().children().keys().max_by(
             |link1, link2| -> Ordering {
-                let node1 = tree.root.children.get(link1).unwrap();
-                let node2 = tree.root.children.get(link2).unwrap();
-                match (node1.wins, node1.total, node2.wins, node2.total) {
+                let node1 = tree.root().children().get(link1).unwrap();
+                let node2 = tree.root().children().get(link2).unwrap();
+                match (node1.wins(), node1.total(), node2.wins(), node2.total()) {
                     (_, 0, _, 0) => Ordering::Equal,
                     (_, 0, _, _) => Ordering::Less,
                     (_, _, _, 0) => Ordering::Greater,
                     (w1, t1, w2, t2) => 
-                        (f64::from(w1) / f64::from(t1)).total_cmp(&(f64::from(w2) / f64::from(t2)))
+                        (f64::from(*w1) / f64::from(*t1)).total_cmp(&(f64::from(*w2) / f64::from(*t2)))
                 }
             }
         ).copied().expect("Somehow there no moves?")
@@ -151,28 +151,28 @@ fn run_mcst_agent(
         }
         _ => panic!("Decision could not be made"),
     };
-    let new_node = agent.view_tree().root.children.get(&decision).unwrap();
-    println!("Win rate: {}/{}", new_node.wins, new_node.total);
+    let new_node = agent.view_tree().root().children().get(&decision).unwrap();
+    println!("Win rate: {}/{}", new_node.wins(), new_node.total());
     decision
 }
 
 fn play_mcst() {
     let mut g = Gamestate::new();
-
     let mut human = agent::HumanDebugger {};
     let second_hundreths = 300;
+
+    println!("{}", g);
+    let first_move = human.make_move(&g);
+    g.make_move_fast(first_move);
+
     let mut mcst_agent = mcst::McstAgent::new(
         BfsSelectionFast::new(),
         BfsExpansion {},
         SimpleDecision {},
         RandomAgent::new(),
         RandomAgent::new(),
+        g.clone(),
     );
-
-    println!("{}", g);
-    let first_move = human.make_move(&g);
-    mcst_agent.game.make_move_fast(first_move);
-    g.make_move(first_move);
 
     let mut computer_move: Turn = None;
 

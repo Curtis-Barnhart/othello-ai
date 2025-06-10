@@ -15,20 +15,33 @@ pub trait DecisionPolicy {
     fn decide(&mut self, tree: &McstTree, game: &Gamestate) -> Turn;
 }
 
-#[derive(Debug)]
 pub struct McstNode {
-    pub children: HashMap<Turn, McstNode>,
-    pub wins: u32,
-    pub total: u32,
+    children: HashMap<Turn, McstNode>,
+    wins: u32,
+    total: u32,
+    game: Gamestate,
 }
 
 impl McstNode {
-    fn new() -> Self {
+    fn new(game: Gamestate) -> Self {
         McstNode {
             children: HashMap::new(),
             wins: 0,
             total: 0,
+            game: game
         }
+    }
+
+    pub fn wins(&self) -> &u32 {
+        &self.wins
+    }
+
+    pub fn total(&self) -> &u32 {
+        &self.total
+    }
+
+    pub fn children(&self) -> &HashMap<Turn, McstNode> {
+        &self.children
     }
 
     fn update(&mut self, win: bool) {
@@ -53,16 +66,19 @@ impl McstNode {
     }
 }
 
-#[derive(Debug)]
 pub struct McstTree {
-    pub root: McstNode,
+    root: McstNode,
 }
 
 impl McstTree {
-    pub fn new() -> Self {
+    pub fn new(game: Gamestate) -> Self {
         McstTree {
-            root: McstNode::new(),
+            root: McstNode::new(game),
         }
+    }
+
+    pub fn root(&self) -> &McstNode {
+        &self.root
     }
 
     // Hmm... what we return is odd. We could return an error to distinguish
@@ -74,7 +90,11 @@ impl McstTree {
             if old.children.contains_key(&link) {
                 None
             } else {
-                let new_child = McstNode::new();
+                let mut new_game = old.game.clone();
+                if !new_game.make_move_fast(link) {
+                    panic!("child didn't make real move");
+                }
+                let new_child = McstNode::new(new_game);
                 old.children.insert(link, new_child);
                 Some(())
             }
@@ -120,8 +140,7 @@ pub struct McstAgent<
     opponent: R,
     decider: D,
     tree: McstTree,
-    // TODO: fix this so there's a way to set the first game
-    pub game: Gamestate,
+    game: Gamestate,
 }
 
 impl<
@@ -136,24 +155,6 @@ R: Agent,
         decider: D,
         rollout: R,
         opponent: R,
-    ) -> Self {
-        McstAgent {
-            selector: selector,
-            expander: expander,
-            decider: decider,
-            rollout: rollout,
-            opponent: opponent,
-            tree: McstTree::new(),
-            game: Gamestate::new()
-        }
-    }
-
-    pub fn from_game(
-        selector: S,
-        expander: E,
-        decider: D,
-        rollout: R,
-        opponent: R,
         game: Gamestate,
     ) -> Self {
         McstAgent {
@@ -162,8 +163,8 @@ R: Agent,
             decider: decider,
             rollout: rollout,
             opponent: opponent,
-            tree: McstTree::new(),
-            game: game
+            tree: McstTree::new(game.clone()),
+            game: game,
         }
     }
 
