@@ -59,7 +59,7 @@ impl SelectionPolicy for BfsSelectionFast {
         }
     }
 
-    fn turns_passed(&mut self, tree: &McstTree, game: &Gamestate, turns: (Turn, Turn)) {
+    fn turns_passed(&mut self, _tree: &McstTree, _game: &Gamestate, _turns: (Turn, Turn)) {
         self.queue.clear();
         self.queue.push_back(Vec::new());
     }
@@ -68,7 +68,7 @@ impl SelectionPolicy for BfsSelectionFast {
 struct BfsExpansion {}
 
 impl ExpansionPolicy for BfsExpansion {
-    fn expand(&mut self, tree: &McstTree, path: &Vec<Turn>, game: &Gamestate) -> Turn {
+    fn expand(&mut self, tree: &McstTree, path: &Vec<Turn>, _game: &Gamestate) -> Turn {
         let node = tree.root().search(&path).unwrap();
         for next_turn in &*node.game().get_moves() {
             if !node.children().contains_key(&next_turn) {
@@ -82,7 +82,7 @@ impl ExpansionPolicy for BfsExpansion {
 struct SimpleDecision {}
 
 impl DecisionPolicy for SimpleDecision {
-    fn decide(&mut self, tree: &McstTree, game: &Gamestate) -> Turn {
+    fn decide(&mut self, tree: &McstTree, _game: &Gamestate) -> Turn {
         tree.root().children().keys().max_by(
             |link1, link2| -> Ordering {
                 let node1 = tree.root().children().get(link1).unwrap();
