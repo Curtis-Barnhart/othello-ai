@@ -4,10 +4,10 @@ use std::io;
 use rand::prelude::IndexedRandom;
 use rand::rngs::ThreadRng;
 
-use crate::gameplay;
+use crate::gameplay::{Gamestate, Turn};
 
 pub trait Agent {
-    fn make_move(&mut self, state: &gameplay::Gamestate) -> (u8, u8);
+    fn make_move(&mut self, state: &Gamestate) -> Turn;
 }
 
 pub struct RandomAgent {
@@ -21,55 +21,63 @@ impl RandomAgent {
 }
 
 impl Agent for RandomAgent {
-    fn make_move(&mut self, state: &gameplay::Gamestate) -> (u8, u8) {
-        state.get_moves()
-            .choose(&mut self.r)
-            .copied()
-            .expect("There were no valid moves.")
+    fn make_move(&mut self, state: &Gamestate) -> Turn {
+        let valid_moves = state.get_moves();
+        valid_moves.choose(&mut self.r)
+                   .copied()
+                   .expect("There were no moves because the game was over.")
     }
 }
 
 pub struct GreedyAgent {}
 
 impl Agent for GreedyAgent {
-    fn make_move(&mut self, state: &gameplay::Gamestate) -> (u8, u8) {
+    fn make_move(&mut self, state: &Gamestate) -> Turn {
         state.get_moves()
-            .iter()
-            .max_by(|(x1, y1), (x2, y2)| -> Ordering {
-                // TODO: figure out wth derefing does to borrowing
-                let v1 = state.clone().make_turn(*x1, *y1).len();
-                let v2 = state.clone().make_turn(*x2, *y2).len();
-                v1.cmp(&v2)
-            })
-        .copied()
-            .expect("There were no valid moves.")
-
+             .iter()
+             .max_by(|t1, t2| -> Ordering {
+                 // TODO: figure out wth derefing does to borrowing
+                 let v1 = state.clone().make_move(**t1).expect("").len();
+                 let v2 = state.clone().make_move(**t2).expect("").len();
+                 v1.cmp(&v2)
+             })
+            .copied()
+            .expect("Game was already won!")
     }
 }
 
 pub struct HumanAgent {}
 
 impl Agent for HumanAgent {
-    fn make_move(&mut self, state: &gameplay::Gamestate) -> (u8, u8) {
+    fn make_move(&mut self, state: &Gamestate) -> Turn {
         let stdin = io::stdin();
         let mut input = String::new();
         let valid_moves = state.get_moves();
 
-        loop {
-            println!("Enter a coordinate:");
-            input.clear();
-            stdin.read_line(&mut input).expect("stdio could not be read from");
-            input.pop();
-
-            if let Some((x, y)) = crate::gameplay::str_to_loc(&input) {
-                if valid_moves.contains(&(x, y)) {
-                    break (x, y)
-                } else {
-                    println!("Not a valid move!");
-                    continue;
-                }
+        if valid_moves.is_empty() {
+            panic!("Game is finished");
+        } else {
+            if valid_moves.contains(&None) {
+                println!("No available moves - return to pass:");
+                stdin.read_line(&mut input).expect("stdio could not be read from");
+                None
             } else {
-                println!("Could not parse coordinate!");
+                loop {
+                    println!("Enter a coordinate:");
+                    input.clear();
+                    stdin.read_line(&mut input).expect("stdio could not be read from");
+                    input.pop();
+
+                    if let Some(location) = crate::gameplay::str_to_loc(&input) {
+                        if valid_moves.contains(&Some(location)) {
+                            break Some(location)
+                        } else {
+                            println!("Not a valid move!");
+                        }
+                    } else {
+                        println!("Could not parse coordinate!");
+                    }
+                }
             }
         }
     }
@@ -78,35 +86,62 @@ impl Agent for HumanAgent {
 pub struct HumanDebugger {}
 
 impl Agent for HumanDebugger {
-    fn make_move(&mut self, state: &gameplay::Gamestate) -> (u8, u8) {
+    fn make_move(&mut self, state: &Gamestate) -> Turn {
         let stdin = io::stdin();
         let mut input = String::new();
         let valid_moves = state.get_moves();
 
-        loop {
-            println!("Enter a coordinate:");
-            input.clear();
-            stdin.read_line(&mut input).expect("stdio could not be read from");
-            input.pop();
+        if valid_moves.contains(&None) {
+            loop {
+                println!("Only valid move is to pass. Return to confirm:");
+                input.clear();
+                stdin.read_line(&mut input).expect("stdio could not be read from");
+                input.pop();
 
-            if input == "/moves" {
-                println!("{}", valid_moves.iter().map(
-                        |(x, y)| -> String { format!("({}, {})", x, y) }
-                ).collect::<Vec<String>>().join(", "));
-            } else if input == "/history" {
-                println!("{}", state.view_history().iter().map(
-                        |(x, y)| -> String { format!("({}, {})", x, y) }
-                ).collect::<Vec<String>>().join(", "));
-            } else {
-                if let Some((x, y)) = crate::gameplay::str_to_loc(&input) {
-                    if valid_moves.contains(&(x, y)) {
-                        break (x, y)
-                    } else {
-                        println!("Not a valid move!");
-                        continue;
-                    }
+                if input == "/moves" {
+                    println!("There are no valid moves besides passing your turn");
+                } else if input == "/history" {
+                    println!("This is a reminder to fix the history feature");
+                    //                println!("{}", state.view_history().iter().map(
+                    //                        |(x, y)| -> String { format!("({}, {})", x, y) }
+                    //                ).collect::<Vec<String>>().join(", "));
                 } else {
-                    println!("Could not parse coordinate!");
+                    break None;
+                }
+            }
+        } else {
+            loop {
+                println!("Enter a coordinate:");
+                input.clear();
+                stdin.read_line(&mut input).expect("stdio could not be read from");
+                input.pop();
+
+                if input == "/moves" {
+                    println!("{}", valid_moves.iter().map(
+                            |turn| -> String {
+                                if let Some((x, y)) = turn {
+                                    format!("({}, {})", x, y) 
+                                } else {
+                                    format!("(Pass)")
+                                }
+                            }
+                    ).collect::<Vec<String>>().join(", "));
+                } else if input == "/history" {
+                    println!("This is a reminder to fix the history feature");
+                    //                println!("{}", state.view_history().iter().map(
+                    //                        |(x, y)| -> String { format!("({}, {})", x, y) }
+                    //                ).collect::<Vec<String>>().join(", "));
+                } else {
+                    if let Some(turn) = crate::gameplay::str_to_loc(&input) {
+                        if valid_moves.contains(&Some(turn)) {
+                            break Some(turn);
+                        } else {
+                            println!("Not a valid move!");
+                            continue;
+                        }
+                    } else {
+                        println!("Could not parse coordinate!");
+                    }
                 }
             }
         }

@@ -1,83 +1,148 @@
 use std::fmt;
 
-pub use crate::mechanics::Players;
-pub use crate::mechanics::States;
+pub use crate::mechanics::{Players, States, Board};
+
+pub type Turn = Option<(u8, u8)>;
 
 #[derive(Clone)]
 pub struct Gamestate {
-    board: crate::mechanics::Board,
-    history: Vec<(u8, u8)>,
+    board: Board,
+    turn: u8,
+    moves: Option<Vec<Turn>>,
 }
 
 impl fmt::Display for Gamestate {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{}\n{} to move",
+            "{}\n{}",
             self.board,
-            if self.whose_turn() == Players::Black { "Black" } else { "White" },
+            match self.whose_turn() {
+                States::Empty => "Game Over",
+                States::Taken(Players::Black) => "Black to play",
+                States::Taken(Players::White) => "White to play",
+            },
         )
     }
 }
 
 impl Gamestate {
-    pub fn new() -> crate::gameplay::Gamestate {
+    pub fn new() -> Self {
         let mut g = Gamestate {
-            board: crate::mechanics::Board::new(),
-            history: Vec::new(),
+            board: Board::new(),
+            turn: 0,
+            moves: None,
         };
-        g.board.change(3, 3, States::Taken(Players::White));
-        g.board.change(4, 4, States::Taken(Players::White));
-        g.board.change(4, 3, States::Taken(Players::Black));
-        g.board.change(3, 4, States::Taken(Players::Black));
+        g.board.pieces[3][3] = States::Taken(Players::White);
+        g.board.pieces[4][4] = States::Taken(Players::White);
+        g.board.pieces[4][3] = States::Taken(Players::Black);
+        g.board.pieces[3][4] = States::Taken(Players::Black);
         g
     }
 
-    pub fn whose_turn(&self) -> Players {
-        if self.history.len() & 1 == 0 { Players::Black } else { Players::White }
+    fn raw_turn(&self) -> Players {
+        if self.turn & 1 == 0 {
+            Players::Black
+        } else {
+            Players::White
+        }
+    }
+
+    pub fn whose_turn(&self) -> States {
+        if self.is_terminal() {
+            States::Empty
+        } else {
+            if self.turn & 1 == 0 {
+                States::Taken(Players::Black)
+            } else {
+                States::Taken(Players::White)
+            }
+        }
     }
 
     pub fn score(&self) -> i8 {
         self.board.score()
     }
 
-    pub fn get_moves(&self) -> Vec<(u8, u8)> {
-        self.board.get_moves(self.whose_turn())
+    // If the game is over, returns None
+    // If pass is the only move, empty list
+    // otherwise, list of moves
+    pub fn get_moves(&self) -> Vec<Turn> {
+        if let States::Taken(whose) = self.whose_turn() {
+            let moves = self.board.get_moves(whose);
+            if moves.is_empty() {
+                vec![None]
+            } else {
+                moves.into_iter().map(
+                    |t| { Some(t) }
+                ).collect()
+            }
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn valid_move(&self, m: Turn) -> bool {
+        if let States::Taken(_) = self.whose_turn() {
+            self.get_moves().contains(&m)
+        } else {
+            false
+        }
     }
 
     pub fn view_board(&self) -> &crate::mechanics::Board {
         &self.board
     }
 
-    pub fn view_history(&self) -> &Vec<(u8, u8)> {
-        &self.history
-    }
-
-    pub fn make_turn(&mut self, x: u8, y: u8) -> Vec<(u8, u8)> {
-        if let Some(States::Empty) = self.board.at(x, y) {
-            self.board.change(x, y, States::Taken(self.whose_turn()));
-            let v = self.board.flip_all(x, y);
-            if v.is_empty() {
-                self.board.change(x, y, States::Empty);
-            } else {
-                self.history.push((x, y));
-            }
-            v
-        } else {
-            Vec::new()
+    pub fn is_terminal(&self) -> bool {
+        let whose_turn = self.raw_turn();
+        let moves = self.board.get_moves(whose_turn);
+        match (moves.is_empty(), whose_turn) {
+            (false, _) => false,
+            (true, Players::Black) => self.board.get_moves(Players::White).is_empty(),
+            (true, Players::White) => self.board.get_moves(Players::Black).is_empty(),
         }
     }
 
-    pub fn make_turns(&mut self, turns: &[(u8, u8)]) -> bool {
-        for (x, y) in turns {
-            let flips = self.make_turn(*x, *y);
-            if flips.is_empty() { return false; }
+    // Returns None if the game is over
+    pub fn make_move(&mut self, turn: Turn) -> Option<Vec<(u8, u8)>> {
+        if let States::Taken(whose_turn) = self.whose_turn() {
+            if self.get_moves().contains(&turn) {
+                self.turn += 1;
+                if let Some((x, y)) = turn {
+                    self.board.change(x, y, States::Taken(whose_turn));
+                    Some(self.board.flip_all(x, y))
+                } else {
+                    Some(Vec::new())
+                }
+            } else { None }
+        } else { None }
+    }
+
+    // Returns None if the game is over
+    pub fn make_move_fast(&mut self, turn: Turn) -> bool {
+        if let States::Taken(whose_turn) = self.whose_turn() {
+            if self.get_moves().contains(&turn) {
+                self.turn += 1;
+                if let Some((x, y)) = turn {
+                    self.board.change(x, y, States::Taken(whose_turn));
+                    self.board.flip_all_fast(x, y);
+                }
+                true
+            } else { false }
+        } else { false }
+    }
+
+    // does not check if the game is over
+    pub fn make_moves_fast(&mut self, turns: &[Turn]) -> bool {
+        for t in turns {
+            if !self.make_move_fast(*t) { return false; }
         }
         true
     }
 }
 
-pub fn str_to_loc(s: &str) -> Option<(u8, u8)> {
+pub fn str_to_loc(s: &str) -> Turn {
     let stripped = s.replace(" ", "");
     let mut iter = stripped.split(",");
     if let (Some(x), Some(y)) = (iter.next(), iter.next()) {

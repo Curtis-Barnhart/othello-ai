@@ -6,16 +6,17 @@ pub mod mcst;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::io::{stdout, Write};
+use std::time::{Instant, Duration};
 
 use mcst::McstAgent;
 
-use crate::gameplay::Gamestate;
+use crate::gameplay::{Gamestate, Turn, States, Players};
 use crate::agent::{Agent, RandomAgent};
-use crate::mcst::{SelectionPolicy, ExpansionPolicy, DecisionPolicy, McstNode, McstTree};
+use crate::mcst::{SelectionPolicy, ExpansionPolicy, DecisionPolicy, McstTree};
 
 struct BfsSelectionFast {
     // queue of nodes to check which must already be in the tree
-    queue: VecDeque<Vec<(u8, u8)>>,
+    queue: VecDeque<Vec<Turn>>,
 }
 
 impl BfsSelectionFast {
@@ -27,32 +28,35 @@ impl BfsSelectionFast {
 }
 
 impl SelectionPolicy for BfsSelectionFast {
-    fn select(&mut self, tree: &McstTree, game: &Gamestate) -> Option<Vec<(u8, u8)>> {
+    fn select(&mut self, tree: &McstTree, game: &Gamestate) -> Option<Vec<Turn>> {
         loop {
             if let Some(path) = self.queue.pop_front() {
                 let mut current_game = game.clone();
-                current_game.make_turns(&path);
+                current_game.make_moves_fast(&path);
                 let current_moves = current_game.get_moves();
-                let current_moves_len = current_moves.len();
 
-                if current_moves_len - tree.root.search(&path).unwrap().children.len() == 0 {
-                    // we have already been here... put in the children and try again
-                    for m in current_moves {
-                        let mut next_path = path.clone();
-                        next_path.push(m);
-                        self.queue.push_back(next_path);
+                if !current_moves.is_empty() {
+                    // there are moves to make
+                    let move_ct = current_moves.len();
+                    if move_ct - tree.root.search(&path).unwrap().children.len() == 0 {
+                        // we have already been here... put in the children and try again
+                        for m in current_moves {
+                            let mut next_path = path.clone();
+                            next_path.push(m);
+                            self.queue.push_back(next_path);
+                        }
+                    } else {
+                        self.queue.push_front(path.clone());
+                        break Some(path);
                     }
-                } else {
-                    self.queue.push_front(path.clone());
-                    break Some(path);
-                }
+                } // else game is over and cannot be selected
             } else {
-                break Some(Vec::new());
+                break None;
             }
         }
     }
 
-    fn turns_passed(&mut self, tree: &McstTree, game: &Gamestate, turns: ((u8, u8), (u8, u8))) {
+    fn turns_passed(&mut self, tree: &McstTree, game: &Gamestate, turns: (Turn, Turn)) {
         self.queue.clear();
         self.queue.push_back(Vec::new());
     }
@@ -61,9 +65,9 @@ impl SelectionPolicy for BfsSelectionFast {
 struct BfsExpansion {}
 
 impl ExpansionPolicy for BfsExpansion {
-    fn expand(&mut self, tree: &McstTree, path: &Vec<(u8, u8)>, game: &Gamestate) -> (u8, u8) {
+    fn expand(&mut self, tree: &McstTree, path: &Vec<Turn>, game: &Gamestate) -> Turn {
         let mut new_game = game.clone();
-        new_game.make_turns(path);
+        new_game.make_moves_fast(path);
         for next_turn in new_game.get_moves() {
             if !tree.root
                     .search(path)
@@ -80,7 +84,7 @@ impl ExpansionPolicy for BfsExpansion {
 struct SimpleDecision {}
 
 impl DecisionPolicy for SimpleDecision {
-    fn decide(&mut self, tree: &McstTree, game: &Gamestate) -> (u8, u8) {
+    fn decide(&mut self, tree: &McstTree, game: &Gamestate) -> Turn {
         tree.root.children.keys().max_by(
             |link1, link2| -> Ordering {
                 let node1 = tree.root.children.get(link1).unwrap();
@@ -103,59 +107,74 @@ fn main() {
 
 fn run_mcst_agent(
     agent: &mut McstAgent<BfsSelectionFast, BfsExpansion, SimpleDecision, RandomAgent>,
-    cycles: u32
-) -> (u8, u8) {
+    compute_time: u128,
+) -> Turn {
     println!("");
-    let mut percent = 0;
-    for c in 0..cycles {
+    let time_0 = Instant::now();
+    let mut hundreths: u128 = 0;
+    let mut count: u32 = 0;
+    loop {
         match agent.cycle() {
             Ok(continuing) => {
                 if !continuing {
-                    panic!("quit");
+                    break;
                 } else {
-                    let temp_percent = (c * 100) / cycles;
-                    if temp_percent > percent {
-                        percent = temp_percent;
-                        print!("\rcompleted {:03}%", percent);
+                    count += 1;
+                    let delta = time_0.elapsed().as_millis() / 10;
+                    if delta >= hundreths {
+                        hundreths = delta;
+                        print!("\relapsed seconds: {}.{:02}", hundreths / 100, hundreths % 100);
                         let _ = stdout().flush();
+                        if hundreths > compute_time {
+                            break;
+                        }
                     }
                 }
             }
             Err(e) => { panic!("errored on {:?}", e) },
         };
     }
-    println!("\rcompleted 100%");
-
-    if let Some(decision) = agent.decide() {
-        println!("Best move: ({}, {})", decision.0, decision.1);
-        let new_node = agent.view_tree().root.children.get(&decision).unwrap();
-        println!("Win rate: {}/{}", new_node.wins, new_node.total);
-        decision
+    if hundreths == 0 {
+        println!("\nCompleted {} iterations (NaN/sec)", count);
     } else {
-        panic!("no decision");
+        println!("\nCompleted {} iterations ({}/sec)", count, u128::from(count * 100) / hundreths);
     }
+
+    let decision = match agent.decide() {
+        Some(Some(loc)) => {
+            println!("Best move: ({}, {})", loc.0, loc.1);
+            Some(loc)
+        },
+        Some(Option::None) => {
+            println!("Best move: pass");
+            None
+        }
+        _ => panic!("Decision could not be made"),
+    };
+    let new_node = agent.view_tree().root.children.get(&decision).unwrap();
+    println!("Win rate: {}/{}", new_node.wins, new_node.total);
+    decision
 }
 
 fn play_mcst() {
     let mut g = Gamestate::new();
 
     let mut human = agent::HumanDebugger {};
-    let cycles = 1 << 17;
+    let second_hundreths = 300;
     let mut mcst_agent = mcst::McstAgent::new(
         BfsSelectionFast::new(),
         BfsExpansion {},
         SimpleDecision {},
         RandomAgent::new(),
         RandomAgent::new(),
-        cycles,
     );
 
     println!("{}", g);
     let first_move = human.make_move(&g);
-    mcst_agent.game.make_turn(first_move.0, first_move.1);
-    g.make_turn(first_move.0, first_move.1);
+    mcst_agent.game.make_move_fast(first_move);
+    g.make_move(first_move);
 
-    let mut computer_move: (u8, u8) = (0, 0);
+    let mut computer_move: Turn = None;
 
     loop {
         println!("{}", g);
@@ -166,16 +185,18 @@ fn play_mcst() {
         }
 
         let player_move = match g.whose_turn() {
-            crate::gameplay::Players::Black => human.make_move(&g),
-            crate::gameplay::Players::White => run_mcst_agent(&mut mcst_agent, cycles),
+            States::Taken(Players::Black) => human.make_move(&g),
+            States::Taken(Players::White) => run_mcst_agent(&mut mcst_agent, second_hundreths),
+            _ => panic!("game should not be over"),
         };
         match g.whose_turn() {
-            crate::gameplay::Players::Black => {
+            States::Taken(Players::Black) => {
                 mcst_agent.next_two_moves(computer_move, player_move);
             }
-            crate::gameplay::Players::White => { computer_move = player_move },
+            States::Taken(Players::White) => { computer_move = player_move },
+            _ => panic!("game should not be over"),
         }
-        g.make_turn(player_move.0, player_move.1);
+        g.make_move_fast(player_move);
     }
 }
 
@@ -194,9 +215,10 @@ fn play_a_game() {
         println!("{}", g);
 
         let player_move = match g.whose_turn() {
-            crate::gameplay::Players::Black => human.make_move(&g),
-            crate::gameplay::Players::White => greedy.make_move(&g),
+            States::Taken(Players::Black) => human.make_move(&g),
+            States::Taken(Players::White) => greedy.make_move(&g),
+            _ => panic!("game should not be over"),
         };
-        g.make_turn(player_move.0, player_move.1);
+        g.make_move(player_move);
     }
 }

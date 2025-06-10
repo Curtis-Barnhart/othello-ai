@@ -20,7 +20,7 @@ pub enum States {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Board {
-    pieces: [[States; 8]; 8],
+    pub pieces: [[States; 8]; 8],
 }
 
 impl fmt::Display for Board {
@@ -165,5 +165,42 @@ impl Board {
             }
         }
         places
+    }
+
+    // does not check x and y values for being on board
+    // If it goes off the side it returns None
+    // If it has no opposite color in between it returns Some(false)
+    fn flip_toward_fast_help(&mut self, x: u8, y: u8, dx: u8, dy: u8, origin: Players) -> FlipType {
+        let new_x = x.wrapping_add(dx);
+        let new_y = y.wrapping_add(dy);
+        if let Some(States::Taken(new_player)) = self.at(new_x, new_y) {
+            if origin != new_player {
+                if self.flip_toward_fast_help(new_x, new_y, dx, dy, origin) != FlipType::Invalid {
+                    self.change(new_x, new_y, States::Taken(origin));
+                    FlipType::Valid
+                } else { FlipType::Invalid }
+            } else { FlipType::Degenerate }
+        } else { FlipType::Invalid }
+    }
+
+    // does not check x and y values for being on board
+    fn flip_toward_fast(&mut self, x: u8, y: u8, dx: u8, dy: u8, origin: Players) -> bool {
+        self.flip_toward_fast_help(x, y, dx, dy, origin) == FlipType::Valid
+    }
+
+    // handles all values of x and y
+    // assumes you have already set the origin
+    pub fn flip_all_fast(&mut self, x: u8, y: u8) -> bool {
+        if let Some(States::Taken(origin)) = self.at(x, y) {
+            let mut any = false;
+            for (dx, dy) in AROUND {
+                if self.flip_toward_fast(x, y, dx, dy, origin) {
+                    any = true;
+                }
+            }
+            any
+        } else {
+            false
+        }
     }
 }
