@@ -177,12 +177,11 @@ R: Agent,
         &self.tree
     }
 
-    //
     fn select(&mut self) -> Result<Option<Vec<Turn>>, SelectionError> {
         if let Some(path) = self.selector.select(&self.tree, &self.game) {
             if let Some(_) = &self.tree.root.search(&path) {
                 let selected_game = self.game_from_path(&path);
-                if selected_game.get_moves().is_empty() {
+                if selected_game.gen_moves().is_empty() {
                     Err(SelectionError::NoExploration(path))
                 } else {
                     Ok(Some(path))
@@ -196,7 +195,7 @@ R: Agent,
     fn expand(&mut self, path: &Vec<Turn>) -> Result<Turn, ExpansionError> {
         let game = self.game_from_path(path);
         let link = self.expander.expand(&self.tree, path, &self.game);
-        if game.get_moves().contains(&link) {
+        if game.gen_moves().contains(&link) {
             if self.node_from_path(path)
                     .children
                     .contains_key(&link) {
@@ -219,7 +218,7 @@ R: Agent,
         };
 
         loop {
-            let valid_moves = game.get_moves();
+            let valid_moves = game.gen_moves();
             if !valid_moves.is_empty() {
                 let player_move = if my_turn {
                     self.rollout.make_move(&game)
@@ -277,7 +276,7 @@ R: Agent,
     // returns none if turn is not valid
     pub fn decide(&mut self) -> Option<Turn> {
         let decision = self.decider.decide(&self.tree, &self.game);
-        if self.game.get_moves().contains(&decision) {
+        if self.game.gen_moves().contains(&decision) {
             Some(decision)
         } else {
             None

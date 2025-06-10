@@ -22,7 +22,7 @@ impl RandomAgent {
 
 impl Agent for RandomAgent {
     fn make_move(&mut self, state: &Gamestate) -> Turn {
-        let valid_moves = state.get_moves();
+        let valid_moves = state.gen_moves();
         valid_moves.choose(&mut self.r)
                    .copied()
                    .expect("There were no moves because the game was over.")
@@ -33,7 +33,7 @@ pub struct GreedyAgent {}
 
 impl Agent for GreedyAgent {
     fn make_move(&mut self, state: &Gamestate) -> Turn {
-        state.get_moves()
+        state.gen_moves()
              .iter()
              .max_by(|t1, t2| -> Ordering {
                  // TODO: figure out wth derefing does to borrowing
@@ -52,7 +52,7 @@ impl Agent for HumanAgent {
     fn make_move(&mut self, state: &Gamestate) -> Turn {
         let stdin = io::stdin();
         let mut input = String::new();
-        let valid_moves = state.get_moves();
+        let valid_moves = state.gen_moves();
 
         if valid_moves.is_empty() {
             panic!("Game is finished");
@@ -89,7 +89,7 @@ impl Agent for HumanDebugger {
     fn make_move(&mut self, state: &Gamestate) -> Turn {
         let stdin = io::stdin();
         let mut input = String::new();
-        let valid_moves = state.get_moves();
+        let valid_moves = state.gen_moves();
 
         if valid_moves.contains(&None) {
             loop {

@@ -6,7 +6,7 @@ pub mod mcst;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::io::{stdout, Write};
-use std::time::{Instant, Duration};
+use std::time::Instant;
 
 use mcst::McstAgent;
 
@@ -33,7 +33,7 @@ impl SelectionPolicy for BfsSelectionFast {
             if let Some(path) = self.queue.pop_front() {
                 let mut current_game = game.clone();
                 current_game.make_moves_fast(&path);
-                let current_moves = current_game.get_moves();
+                let current_moves = current_game.gen_moves();
 
                 if !current_moves.is_empty() {
                     // there are moves to make
@@ -68,7 +68,7 @@ impl ExpansionPolicy for BfsExpansion {
     fn expand(&mut self, tree: &McstTree, path: &Vec<Turn>, game: &Gamestate) -> Turn {
         let mut new_game = game.clone();
         new_game.make_moves_fast(path);
-        for next_turn in new_game.get_moves() {
+        for next_turn in new_game.gen_moves() {
             if !tree.root
                     .search(path)
                     .expect("Invalid path given for expansion")
@@ -178,7 +178,7 @@ fn play_mcst() {
 
     loop {
         println!("{}", g);
-        let valid_moves = g.get_moves();
+        let valid_moves = g.gen_moves();
         if valid_moves.is_empty() {
             println!("Game over - score: {}", g.score());
             break;
@@ -207,7 +207,7 @@ fn play_a_game() {
     let mut human = agent::HumanDebugger {};
 
     loop {
-        let valid_moves = g.get_moves();
+        let valid_moves = g.gen_moves();
         if valid_moves.is_empty() {
             println!("Game over - score: {}", g.score());
             break;
