@@ -4,7 +4,7 @@ use std::io;
 use rand::prelude::IndexedRandom;
 use rand::rngs::ThreadRng;
 
-use crate::gameplay::{Gamestate, Turn};
+use crate::gameplay::{Gamestate, Turn, States, Players};
 
 pub trait Agent {
     fn make_move(&mut self, state: &Gamestate) -> Turn;
@@ -83,6 +83,34 @@ impl Agent for HumanAgent {
     }
 }
 
+pub struct MemoryHumanAgent {
+    game: Gamestate,
+}
+
+impl MemoryHumanAgent {
+    pub fn new() -> Self {
+        MemoryHumanAgent { game: Gamestate::new() }
+    }
+}
+
+impl MemoryAgent for MemoryHumanAgent {
+    fn initialize_game(&mut self, state: Gamestate) {
+        self.game = state;
+    }
+
+    fn make_move(&mut self) -> Turn {
+        let mut a = HumanAgent {};
+        //println!("{}", self.game);
+        let turn = a.make_move(&self.game);
+        self.game.make_move(turn);
+        turn
+    }
+
+    fn opponent_move(&mut self, op: &Turn) {
+        self.game.make_move(*op);
+    }
+}
+
 pub struct HumanDebugger {}
 
 impl Agent for HumanDebugger {
@@ -147,3 +175,50 @@ impl Agent for HumanDebugger {
         }
     }
 }
+
+pub trait MemoryAgent {
+    fn initialize_game(&mut self, state: Gamestate);
+    fn opponent_move(&mut self, op: &Turn);
+    fn make_move(&mut self) -> Turn;
+}
+
+pub fn play_memory_agents
+<A1: MemoryAgent, A2: MemoryAgent>
+(agent1: &mut A1, agent2: &mut A2) -> (i8, Vec<Turn>) {
+    let mut history: Vec<Turn> = Vec::new();
+    let mut game = Gamestate::new();
+    agent1.initialize_game(game.clone());
+
+    println!("{}", game);
+    let first_move = agent1.make_move();
+    history.push(first_move);
+    if !game.make_move_fast(first_move) {
+        panic!("illegal move");
+    }
+
+    agent2.initialize_game(game.clone());
+
+    loop {
+        let valid_moves = game.get_moves();
+        if valid_moves.is_empty() {
+            println!("Game over - score: {}", game.score());
+            break (game.score(), history);
+        }
+        println!("\n{}", game);
+
+        let player_move = match game.whose_turn() {
+            States::Taken(Players::Black) => agent1.make_move(),
+            States::Taken(Players::White) => agent2.make_move(),
+            _ => panic!("game should not be over"),
+        };
+        if !game.make_move_fast(player_move) {
+            panic!("illegal move");
+        }
+        match game.whose_turn() {
+            States::Taken(Players::Black) => agent1.opponent_move(&player_move),
+            States::Taken(Players::White) => agent2.opponent_move(&player_move),
+            _ => (),
+        };
+    }
+}
+

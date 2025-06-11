@@ -14,6 +14,14 @@ pub struct Gamestate {
     moves: RefCell<Option<Rc<Vec<Turn>>>>,
 }
 
+pub fn mock_game(board: Board, turn: u8) -> Gamestate {
+    Gamestate {
+        board: board,
+        turn: turn,
+        moves: RefCell::new(None),
+    }
+}
+
 impl fmt::Display for Gamestate {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

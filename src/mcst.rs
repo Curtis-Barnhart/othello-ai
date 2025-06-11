@@ -5,14 +5,14 @@ use crate::agent::Agent;
 use crate::gameplay::{Gamestate, Players, States, Turn};
 
 pub trait SelectionPolicy {
-    fn select(&mut self, tree: &McstTree, game: &Gamestate) -> Option<Vec<Turn>>;
+    fn select(&mut self, tree: &McstTree) -> Option<Vec<Turn>>;
     fn turns_passed(&mut self, tree: &McstTree, game: &Gamestate, turns: (Turn, Turn)) {}
 }
 pub trait ExpansionPolicy {
-    fn expand(&mut self, tree: &McstTree, path: &Vec<Turn>, game: &Gamestate) -> Turn;
+    fn expand(&mut self, tree: &McstTree, path: &Vec<Turn>) -> Turn;
 }
 pub trait DecisionPolicy {
-    fn decide(&mut self, tree: &McstTree, game: &Gamestate) -> Turn;
+    fn decide(&mut self, tree: &McstTree) -> Turn;
 }
 
 pub struct McstNode {
@@ -181,13 +181,9 @@ R: Agent,
     }
 
     fn select(&mut self) -> Result<Option<Vec<Turn>>, SelectionError> {
-        if let Some(path) = self.selector.select(&self.tree, &self.game) {
-            if let Some(node) = &self.tree.root.search(&path) {
-                if node.game().get_moves().is_empty() {
-                    Err(SelectionError::NoExploration(path))
-                } else {
-                    Ok(Some(path))
-                }
+        if let Some(path) = self.selector.select(&self.tree) {
+            if let Some(_) = &self.tree.root.search(&path) {
+                Ok(Some(path))
             } else { Err(SelectionError::NotANode(path)) }
         } else { Ok(None) }
     }
@@ -195,7 +191,7 @@ R: Agent,
     // path *must* refer to a valid node - will panic otherwise
     // Ok value guaranteed to return an unexpanded node
     fn expand(&mut self, path: &Vec<Turn>) -> Result<Turn, ExpansionError> {
-        let link = self.expander.expand(&self.tree, path, &self.game);
+        let link = self.expander.expand(&self.tree, path);
         let node = self.node_from_path(path);
         if node.game().get_moves().contains(&link) {
             if node.children.contains_key(&link) {
@@ -250,15 +246,17 @@ R: Agent,
             Ok(Option::None) => return Ok(false),
         };
 
-        match self.expand(&path) {
-            Err(e) => return Err(CycleError::Expansion(e)),
-            Ok(expansion) => {
-                self.tree
-                    .add_child(&path, expansion)
-                    .expect("Failed to add child from expansion");
-                path.push(expansion);
-            },
-        };
+        if !self.node_from_path(&path).game().get_moves().is_empty() {
+            match self.expand(&path) {
+                Err(e) => return Err(CycleError::Expansion(e)),
+                Ok(expansion) => {
+                    self.tree
+                        .add_child(&path, expansion)
+                        .expect("Failed to add child from expansion");
+                    path.push(expansion);
+                },
+            };
+        }
 
         let win = match self.rollout(&path, path.len() & 1 == 0) {
             Err(e) => return Err(CycleError::Rollout(e)),
@@ -275,7 +273,7 @@ R: Agent,
 
     // returns none if turn is not valid
     pub fn decide(&mut self) -> Option<Turn> {
-        let decision = self.decider.decide(&self.tree, &self.game);
+        let decision = self.decider.decide(&self.tree);
         if self.game.get_moves().contains(&decision) {
             Some(decision)
         } else {
