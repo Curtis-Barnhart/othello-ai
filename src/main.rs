@@ -9,11 +9,10 @@ use std::io::{stdout, stdin, Write};
 use std::time::Instant;
 use std::env;
 
-use agent::{play_memory_agents, MemoryAgent, MemoryHumanAgent};
-use gameplay::{mock_game, Board};
-
+use mechanics::Board;
 use crate::gameplay::{Gamestate, Turn, States, Players};
-use crate::agent::{Agent, RandomAgent};
+use agent::{play_memory_agents, MemoryAgent};
+use agent::implementations::RandomAgent;
 use crate::mcst::{SelectionPolicy, ExpansionPolicy, DecisionPolicy, McstTree, McstAgent, McstNode};
 
 struct UctSelection {
@@ -213,10 +212,10 @@ impl BfsMemoryAgent {
 }
 
 impl UctMemoryAgent {
-    pub fn new(compute_time: u128) -> Self {
+    pub fn new(compute_time: u128, learn_rate: f64) -> Self {
         UctMemoryAgent {
             agent: mcst::McstAgent::new(
-            UctSelection::new(2_f64.sqrt()),
+            UctSelection::new(learn_rate),
             BfsExpansion {},
             UctDecision {},
             RandomAgent::new(),
@@ -242,22 +241,18 @@ impl MemoryAgent for UctMemoryAgent {
     }
 
     fn make_move(&mut self) -> Turn {
-        println!("");
+        //println!("");
         let time_0 = Instant::now();
         let mut hundreths: u128 = 0;
-        let mut count: u32 = 0;
         loop {
             match self.agent.cycle() {
                 Ok(continuing) => {
                     if !continuing {
                         break;
                     } else {
-                        count += 1;
                         let delta = time_0.elapsed().as_millis() / 10;
                         if delta >= hundreths {
                             hundreths = delta;
-                            print!("\relapsed seconds: {}.{:02}", hundreths / 100, hundreths % 100);
-                            let _ = stdout().flush();
                             if hundreths > self.compute_time {
                                 break;
                             }
@@ -267,25 +262,16 @@ impl MemoryAgent for UctMemoryAgent {
                 Err(e) => { panic!("errored on {:?}", e) },
             };
         }
-        if hundreths == 0 {
-            println!("\nCompleted {} iterations (NaN/sec)", count);
-        } else {
-            println!("\nCompleted {} iterations ({}/sec)", count, u128::from(count * 100) / hundreths);
-        }
 
         let decision = match self.agent.decide() {
             Some(Some(loc)) => {
-                println!("Best move: ({}, {})", loc.0, loc.1);
                 Some(loc)
             },
             Some(Option::None) => {
-                println!("Best move: pass");
                 None
             }
             _ => panic!("Decision could not be made"),
         };
-        let new_node = self.agent.view_tree().root().children().get(&decision).unwrap();
-        println!("Win rate: {}/{}", new_node.wins(), new_node.total());
 
         self.last_move = decision;
         decision
@@ -309,22 +295,18 @@ impl MemoryAgent for BfsMemoryAgent {
     }
 
     fn make_move(&mut self) -> Turn {
-        println!("");
+        //println!("");
         let time_0 = Instant::now();
         let mut hundreths: u128 = 0;
-        let mut count: u32 = 0;
         loop {
             match self.agent.cycle() {
                 Ok(continuing) => {
                     if !continuing {
                         break;
                     } else {
-                        count += 1;
                         let delta = time_0.elapsed().as_millis() / 10;
                         if delta >= hundreths {
                             hundreths = delta;
-                            print!("\relapsed seconds: {}.{:02}", hundreths / 100, hundreths % 100);
-                            let _ = stdout().flush();
                             if hundreths > self.compute_time {
                                 break;
                             }
@@ -334,25 +316,16 @@ impl MemoryAgent for BfsMemoryAgent {
                 Err(e) => { panic!("errored on {:?}", e) },
             };
         }
-        if hundreths == 0 {
-            println!("\nCompleted {} iterations (NaN/sec)", count);
-        } else {
-            println!("\nCompleted {} iterations ({}/sec)", count, u128::from(count * 100) / hundreths);
-        }
 
         let decision = match self.agent.decide() {
             Some(Some(loc)) => {
-                println!("Best move: ({}, {})", loc.0, loc.1);
                 Some(loc)
             },
             Some(Option::None) => {
-                println!("Best move: pass");
                 None
             }
             _ => panic!("Decision could not be made"),
         };
-        let new_node = self.agent.view_tree().root().children().get(&decision).unwrap();
-        println!("Win rate: {}/{}", new_node.wins(), new_node.total());
 
         self.last_move = decision;
         decision
@@ -365,25 +338,39 @@ impl MemoryAgent for BfsMemoryAgent {
 
 fn main() {
     //let _ = stdin().read_line(&mut String::new());
-    let args: Vec<String> = env::args().collect();
+    // from sqrt(2)/2 to 2sqrt(2)
+    let base = 2_f64.sqrt() / 2_f64;
+    let unit = base / 16_f64;
 
-    let mut bfs = BfsMemoryAgent::new(300);
-    let mut hum = MemoryHumanAgent::new();
+    loop {
+        for m in 0..48 {
+            let lr = base + f64::from(m) * unit;
 
-    let (score, _) = match args.get(1) {
-        Option::None => panic!("Please give -f for computer goes first and -s for second."),
-        Some(s) => {
-            if s == "-f" {
-                play_memory_agents(&mut bfs, &mut hum)
-            } else if s == "-s" {
-                play_memory_agents(&mut hum, &mut bfs)
-            } else {
-                panic!("accepted args are -f and -s");
+            {
+                let mut bfs = BfsMemoryAgent::new(100);
+                let mut utc = UctMemoryAgent::new(100, lr);
+                let (score, _) = play_memory_agents(&mut bfs, &mut utc);
+                match score.partial_cmp(&0) {
+                    Some(Ordering::Greater) => println!("second,{},loss", lr),
+                    Some(Ordering::Less) => println!("second,{},win", lr),
+                    Some(Ordering::Equal) => println!("second,{},tie", lr),
+                    _ => panic!("wtf"),
+                }
             }
-        },
-    };
 
-    println!("Final score is {}!", score);
+            {
+                let mut bfs = BfsMemoryAgent::new(100);
+                let mut utc = UctMemoryAgent::new(100, lr);
+                let (score, _) = play_memory_agents(&mut utc, &mut bfs);
+                match score.partial_cmp(&0) {
+                    Some(Ordering::Greater) => println!("first,{},win", lr),
+                    Some(Ordering::Less) => println!("first,{},loss", lr),
+                    Some(Ordering::Equal) => println!("first,{},tie", lr),
+                    _ => panic!("wtf"),
+                }
+            }
+        }
+    }
 }
 
 fn test() {
@@ -394,7 +381,7 @@ fn test() {
     b.change(4, 2, States::Taken(Players::White));
     b.change(5, 2, States::Taken(Players::White));
 
-    let g = mock_game(b, 0);
+    let g = Gamestate::new_mock(b, 0);
 
     let mut mcst_agent = mcst::McstAgent::new(
         UctSelection::new(2_f64.sqrt()),
@@ -417,123 +404,5 @@ fn test() {
             pair.1.wins(),
             pair.1.total(),
         );
-    }
-}
-
-fn run_mcst_agent(
-    agent: &mut McstAgent<UctSelection, BfsExpansion, UctDecision, RandomAgent>,
-    compute_time: u128,
-) -> Turn {
-    println!("");
-    let time_0 = Instant::now();
-    let mut hundreths: u128 = 0;
-    let mut count: u32 = 0;
-    loop {
-        match agent.cycle() {
-            Ok(continuing) => {
-                if !continuing {
-                    break;
-                } else {
-                    count += 1;
-                    let delta = time_0.elapsed().as_millis() / 10;
-                    if delta >= hundreths {
-                        hundreths = delta;
-                        print!("\relapsed seconds: {}.{:02}", hundreths / 100, hundreths % 100);
-                        let _ = stdout().flush();
-                        if hundreths > compute_time {
-                            break;
-                        }
-                    }
-                }
-            }
-            Err(e) => { panic!("errored on {:?}", e) },
-        };
-    }
-    if hundreths == 0 {
-        println!("\nCompleted {} iterations (NaN/sec)", count);
-    } else {
-        println!("\nCompleted {} iterations ({}/sec)", count, u128::from(count * 100) / hundreths);
-    }
-
-    let decision = match agent.decide() {
-        Some(Some(loc)) => {
-            println!("Best move: ({}, {})", loc.0, loc.1);
-            Some(loc)
-        },
-        Some(Option::None) => {
-            println!("Best move: pass");
-            None
-        }
-        _ => panic!("Decision could not be made"),
-    };
-    let new_node = agent.view_tree().root().children().get(&decision).unwrap();
-    println!("Win rate: {}/{}", new_node.wins(), new_node.total());
-    decision
-}
-
-fn play_mcst() {
-    let mut g = Gamestate::new();
-    let mut human = agent::HumanDebugger {};
-    let second_hundreths = 300;
-
-    println!("{}", g);
-    let first_move = human.make_move(&g);
-    g.make_move_fast(first_move);
-
-    let mut mcst_agent = mcst::McstAgent::new(
-        UctSelection::new(2_f64.sqrt()),
-        BfsExpansion {},
-        UctDecision {},
-        RandomAgent::new(),
-        RandomAgent::new(),
-        g.clone(),
-    );
-
-    let mut computer_move: Turn = None;
-
-    loop {
-        println!("{}", g);
-        let valid_moves = g.get_moves();
-        if valid_moves.is_empty() {
-            println!("Game over - score: {}", g.score());
-            break;
-        }
-
-        let player_move = match g.whose_turn() {
-            States::Taken(Players::Black) => human.make_move(&g),
-            States::Taken(Players::White) => run_mcst_agent(&mut mcst_agent, second_hundreths),
-            _ => panic!("game should not be over"),
-        };
-        match g.whose_turn() {
-            States::Taken(Players::Black) => {
-                mcst_agent.next_two_moves(computer_move, player_move);
-            }
-            States::Taken(Players::White) => { computer_move = player_move },
-            _ => panic!("game should not be over"),
-        }
-        g.make_move_fast(player_move);
-    }
-}
-
-fn play_a_game() {
-    let mut g = Gamestate::new();
-
-    let mut greedy = agent::GreedyAgent {};
-    let mut human = agent::HumanDebugger {};
-
-    loop {
-        let valid_moves = g.get_moves();
-        if valid_moves.is_empty() {
-            println!("Game over - score: {}", g.score());
-            break;
-        }
-        println!("{}", g);
-
-        let player_move = match g.whose_turn() {
-            States::Taken(Players::Black) => human.make_move(&g),
-            States::Taken(Players::White) => greedy.make_move(&g),
-            _ => panic!("game should not be over"),
-        };
-        g.make_move(player_move);
     }
 }

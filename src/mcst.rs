@@ -148,10 +148,10 @@ pub struct McstAgent<
 }
 
 impl<
-S: SelectionPolicy,
-E: ExpansionPolicy,
-D: DecisionPolicy,
-R: Agent,
+    S: SelectionPolicy,
+    E: ExpansionPolicy,
+    D: DecisionPolicy,
+    R: Agent,
 > McstAgent<S, E, D, R> {
     pub fn new(
         selector: S,
