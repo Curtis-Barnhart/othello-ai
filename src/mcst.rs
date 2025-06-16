@@ -4,25 +4,40 @@ use std::cmp::Ordering;
 use crate::agent::Agent;
 use crate::gameplay::{Gamestate, Players, States, Turn};
 
+/// A trait for defining how nodes are selected during MCTS traversal.
 pub trait SelectionPolicy {
+    /// Select a path through the tree to expand or evaluate.
     fn select(&mut self, tree: &McstTree) -> Option<Vec<Turn>>;
-    fn turns_passed(&mut self, tree: &McstTree, game: &Gamestate, turns: (Turn, Turn)) {}
+    /// Inform the selector of the two most recent moves.
+    fn turns_passed(&mut self, tree: &McstTree, turns: (Turn, Turn)) {}
 }
+
+/// A trait for defining how the tree expands new nodes.
 pub trait ExpansionPolicy {
+    /// Choose which move to expand from the given path.
     fn expand(&mut self, tree: &McstTree, path: &Vec<Turn>) -> Turn;
 }
+
+/// A trait for deciding which move to make from the current root state.
 pub trait DecisionPolicy {
+    /// Choose the best move to play based on the tree.
     fn decide(&mut self, tree: &McstTree) -> Turn;
 }
 
+/// A single node in the Monte Carlo Search Tree.
 pub struct McstNode {
+    /// The children of this node by which turn you take to get there.
     children: HashMap<Turn, McstNode>,
+    /// How many wins rollouts from this node or its descendants have.
     wins: u32,
+    /// How many rollouts from this node or its descendants have been played.
     total: u32,
+    /// Gamestate at this node.
     game: Gamestate,
 }
 
 impl McstNode {
+    /// Create a new node with the given game state.
     fn new(game: Gamestate) -> Self {
         McstNode {
             children: HashMap::new(),
@@ -32,27 +47,33 @@ impl McstNode {
         }
     }
 
+    /// Immutable [McstNode::game] getter.
     pub fn game(&self) -> &Gamestate {
         &self.game
     }
 
+    /// Immutable [McstNode::wins] getter.
     pub fn wins(&self) -> &u32 {
         &self.wins
     }
 
+    /// Immutable [McstNode::total] getter.
     pub fn total(&self) -> &u32 {
         &self.total
     }
 
+    /// Immutable [McstNode::children] getter.
     pub fn children(&self) -> &HashMap<Turn, McstNode> {
         &self.children
     }
 
+    /// Update the win count after a rollout.
     fn update(&mut self, win: bool) {
         if win { self.wins += 1 };
         self.total += 1;
     }
 
+    /// Recursively search for a mutable reference to a node along a path.
     fn search_mut(&mut self, path: &[Turn]) -> Option<&mut McstNode> {
         if let Some(child) = &path.first() {
             if let Some(child) = self.children.get_mut(child) {
@@ -61,6 +82,7 @@ impl McstNode {
         } else { Some(self) }
     }
 
+    /// Recursively search for an immutable reference to a node along a path.
     pub fn search(&self, path: &[Turn]) -> Option<&McstNode> {
         if let Some(child) = &path.first() {
             if let Some(child) = self.children.get(child) {
@@ -70,29 +92,32 @@ impl McstNode {
     }
 }
 
+/// The Monte Carlo Search Tree.
 pub struct McstTree {
     root: McstNode,
 }
 
 impl McstTree {
+    /// Create a new MCTS tree from a game state.
     pub fn new(game: Gamestate) -> Self {
         McstTree {
             root: McstNode::new(game),
         }
     }
 
+    /// Immutable [McstTree::root] getter.
     pub fn root(&self) -> &McstNode {
         &self.root
     }
 
-    // Hmm... what we return is odd. We could return an error to distinguish
-    // between running out of nodes and having an invalid path.
-    // We could also use lifetimes to return an actual reference to the child
-    // I think. Not sure if there's a benefit to that yet though.
-    pub fn add_child(&mut self, path: &[Turn], link: Turn) -> Option<()> {
+    /// Add a child node by performing a move from a given path.
+    ///
+    /// # Panics
+    /// If the path is invalid or the child already exists.
+    pub fn add_child(&mut self, path: &[Turn], link: Turn) {
         if let Some(old) = self.root.search_mut(path) {
             if old.children.contains_key(&link) {
-                None
+                panic!("already contained child");
             } else {
                 let mut new_game = old.game.clone();
                 if !new_game.make_move_fast(link) {
@@ -100,14 +125,14 @@ impl McstTree {
                 }
                 let new_child = McstNode::new(new_game);
                 old.children.insert(link, new_child);
-                Some(())
             }
         } else {
-            None
+            panic!("path was not valid");
         }
     }
 }
 
+/// Errors that can occur during a full MCTS cycle.
 #[derive(Debug)]
 pub enum CycleError {
     Selection(SelectionError),
@@ -115,23 +140,31 @@ pub enum CycleError {
     Rollout(RolloutError),
 }
 
+/// Errors that can occur during the selection phase.
 #[derive(Debug)]
 pub enum SelectionError {
-    NotANode(Vec<Turn>),  // gave us a path to a node we do not have
-    NoExploration(Vec<Turn>),  // gave us a path to a node whose gamestate is terminal
+    /// The path given by the selection policy does not lead to a valid node.
+    NotANode(Vec<Turn>),
 }
 
+/// Errors that can occur during the expansion phase.
 #[derive(Debug)]
 pub enum ExpansionError {
-    IllegalMove(Turn),  // gave us an invalid move
-    AlreadyExpanded(Turn),  // expanded to a node we already have
+    /// The selected move is illegal in the given game state.
+    IllegalMove(Turn),
+    /// A child node for the move already exists.
+    AlreadyExpanded(Turn),
 }
 
+/// Errors that can occur during the rollout (simulation) phase.
 #[derive(Debug)]
 pub enum RolloutError {
+    /// A move attempted during simulation was invalid.
     IllegalMove(Vec<Turn>),
 }
 
+/// A configurable MCTS agent composed of modular policies for selection,
+/// expansion, rollout, and decision making.
 pub struct McstAgent<
     S: SelectionPolicy,
     E: ExpansionPolicy,
@@ -144,7 +177,6 @@ pub struct McstAgent<
     opponent: R,
     decider: D,
     tree: McstTree,
-    game: Gamestate,
 }
 
 impl<
@@ -153,6 +185,7 @@ impl<
     D: DecisionPolicy,
     R: Agent,
 > McstAgent<S, E, D, R> {
+    /// Construct a new MCTS agent using the given policies and starting state.
     pub fn new(
         selector: S,
         expander: E,
@@ -167,19 +200,21 @@ impl<
             decider: decider,
             rollout: rollout,
             opponent: opponent,
-            tree: McstTree::new(game.clone()),
-            game: game,
+            tree: McstTree::new(game),
         }
     }
 
-    pub fn view_game(&self) -> &Gamestate {
-        &self.game
-    }
-
-    pub fn view_tree(&self) -> &McstTree {
+    /// Immutable [McstAgent::tree] getter.
+    pub fn tree(&self) -> &McstTree {
         &self.tree
     }
 
+    /// Run the selection phase.
+    ///
+    /// Returns a path iff a node was selected.
+    /// Returns Ok(None) if the selector has decided there is no need to
+    /// consider more cycles.
+    /// Returns an error if the selector gave an invalid path.
     fn select(&mut self) -> Result<Option<Vec<Turn>>, SelectionError> {
         if let Some(path) = self.selector.select(&self.tree) {
             if let Some(_) = &self.tree.root.search(&path) {
@@ -188,11 +223,13 @@ impl<
         } else { Ok(None) }
     }
 
-    // path *must* refer to a valid node - will panic otherwise
-    // Ok value guaranteed to return an unexpanded node
+    /// Expand a new move from the node at the given path.
+    ///
+    /// # Panics
+    /// If the path to the node to expand is invalid.
     fn expand(&mut self, path: &Vec<Turn>) -> Result<Turn, ExpansionError> {
         let link = self.expander.expand(&self.tree, path);
-        let node = self.node_from_path(path);
+        let node = self.node_from_path(path); // may panic
         if node.game().get_moves().contains(&link) {
             if node.children.contains_key(&link) {
                 Err(ExpansionError::AlreadyExpanded(link))
@@ -204,18 +241,22 @@ impl<
         }
     }
 
+    /// Perform a simulated playout from the given path and
+    /// return whether the root player won.
+    ///
+    /// # Panics
+    /// On invalid `path`.
     fn rollout(&mut self, path: &Vec<Turn>, mut my_turn: bool) -> Result<bool, RolloutError> {
-        let mut game = self.node_from_path(path).game().clone();
+        let mut game = self.node_from_path(path).game().clone(); // panics on invalid path
         // TODO: optimize by removing move_history?
         let mut move_history: Vec<Turn> = Vec::new();
-        let my_color = match self.game.whose_turn() {
+        let my_color = match self.tree.root.game.whose_turn() {
             States::Taken(c) => c,
             States::Empty => panic!("initial game is over?"),
         };
 
         loop {
-            let valid_moves = game.get_moves();
-            if !valid_moves.is_empty() {
+            if !game.is_terminal() {
                 let player_move = if my_turn {
                     self.rollout.make_move(&game)
                 } else {
@@ -237,7 +278,10 @@ impl<
         }
     }
 
-    // the bool here says whether the selector decided this cycle was worth completing
+    /// Perform one full MCTS cycle: selection, expansion, rollout, backpropagation.
+    ///
+    /// Returns `Ok(false)` if the selector chose not to proceed
+    /// and `Ok(true)` if it was successful and wants to continue cycling.
     pub fn cycle(&mut self) -> Result<bool, CycleError> {
         let path = self.select();
         let mut path = match path {
@@ -246,13 +290,11 @@ impl<
             Ok(Option::None) => return Ok(false),
         };
 
-        if !self.node_from_path(&path).game().get_moves().is_empty() {
-            match self.expand(&path) {
+        if !self.node_from_path(&path).game.is_terminal() {
+            match self.expand(&path) { // won't panic because path is validated above
                 Err(e) => return Err(CycleError::Expansion(e)),
                 Ok(expansion) => {
-                    self.tree
-                        .add_child(&path, expansion)
-                        .expect("Failed to add child from expansion");
+                    self.tree.add_child(&path, expansion);
                     path.push(expansion);
                 },
             };
@@ -271,17 +313,22 @@ impl<
         Ok(true)
     }
 
-    // returns none if turn is not valid
+    /// Choose a move to play based on the current tree.
+    ///
+    /// Returns `None` if the decision is invalid in the root game state.
     pub fn decide(&mut self) -> Option<Turn> {
         let decision = self.decider.decide(&self.tree);
-        if self.game.get_moves().contains(&decision) {
+        if self.tree.root.game.valid_move(decision) {
             Some(decision)
         } else {
             None
         }
     }
 
-    // path must point to a valid node, will panic otherwise
+    /// Get a mutable reference to a node at a specific path.
+    ///
+    /// # Panics
+    /// If the path does not refer to a valid node.
     fn node_from_path_mut(&mut self, path: &[Turn]) -> &mut McstNode {
         self.tree
             .root
@@ -289,7 +336,10 @@ impl<
             .expect("Node from path given invalid path")
     }
 
-    // path must point to a valid node, will panic otherwise
+    /// Get an immutable reference to a node at a specific path.
+    ///
+    /// # Panics
+    /// If the path does not refer to a valid node.
     fn node_from_path(&self, path: &[Turn]) -> &McstNode {
         self.tree
             .root
@@ -297,21 +347,26 @@ impl<
             .expect("Node from path given invalid path")
     }
 
+    /// Advance the tree to reflect two new moves.
+    ///
+    /// Replaces the root with the subtree corresponding to the new state.
+    /// Returns `false` if the moves were invalid.
     pub fn next_two_moves(&mut self, mv1: Turn, mv2: Turn) -> bool {
-        let mut test_game = self.game.clone();
+        let mut test_game = self.tree.root.game.clone();
         if !test_game.make_moves_fast(&[mv1, mv2]) {
             false
         } else {
-            self.game.make_moves_fast(&[mv1, mv2]);
             // add first and second children if not in tree, then replace root
             if !self.tree.root.children.contains_key(&mv1) {
-                if let Option::None = self.tree.add_child(&[], mv1) {
-                    panic!("");
-                }
+                // won't panic since it is verified that mv1 is not in children
+                self.tree.add_child(&[], mv1);
             }
+            // won't panic because we just put mv1 into the tree
             if !self.tree.root.children.get(&mv1).unwrap().children.contains_key(&mv2) {
-                self.tree.add_child(&[mv1], mv2);
+                // won't panic since it is verified that mv2 is not in children
+                self.tree.add_child(&[mv1], mv2); // panics on invalid path
             }
+            // won't panic because we just put mv1 and mv2 into the tree
             self.tree.root = self.tree
                                  .root
                                  .children
@@ -321,7 +376,7 @@ impl<
                                  .remove(&mv2)
                                  .unwrap();
 
-            self.selector.turns_passed(&self.tree, &self.game, (mv1, mv2));
+            self.selector.turns_passed(&self.tree,  (mv1, mv2));
             true
         }
     }

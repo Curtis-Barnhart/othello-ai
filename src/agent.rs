@@ -2,10 +2,16 @@ pub mod implementations;
 
 use crate::gameplay::{Gamestate, Turn, States, Players};
 
+/// An Agent implements what is the bare minimum to play a game:
+/// taking a look at a board and spitting out a valid turn.
 pub trait Agent {
     fn make_move(&self, state: &Gamestate) -> Turn;
 }
 
+/// A MemoryAgent is a little more complicated than an [Agent].
+/// Instead of just looking at a board and spitting out a move,
+/// it provides the ability to carry information from previous turns
+/// to future turns.
 pub trait MemoryAgent {
     fn initialize_game(&mut self, state: Gamestate);
     fn opponent_move(&mut self, op: &Turn);
