@@ -47,6 +47,7 @@ pub fn play_memory_agents
         if !game.make_move_fast(player_move) {
             panic!("illegal move");
         }
+        history.push(player_move);
         match game.whose_turn() {
             States::Taken(Players::Black) => agent1.opponent_move(&player_move),
             States::Taken(Players::White) => agent2.opponent_move(&player_move),

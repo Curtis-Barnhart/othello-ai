@@ -10,6 +10,40 @@ use crate::agent::{Agent, MemoryAgent};
 use crate::gameplay::{Gamestate, Turn};
 use crate::mcst::{McstNode, McstTree, McstAgent, SelectionPolicy, ExpansionPolicy, DecisionPolicy};
 
+/// A simple agent that selects moves based on a predefined ranking of board cells.
+///
+/// The agent evaluates available moves in the order specified by the `ranking` vector.
+/// It selects the highest-ranked available move as its turn.
+pub struct RankedCellAgent {
+    /// A prioritized list of cell coordinates, ordered from most to least preferred.
+    ranking: Vec<(u8, u8)>
+}
+
+impl RankedCellAgent {
+    /// Creates a new `RankedCellAgent` with the given cell preference ranking.
+    pub fn new(ranking: Vec<(u8, u8)>) -> Self {
+        RankedCellAgent {ranking}
+    }
+}
+
+impl Agent for RankedCellAgent {
+    /// Selects a move from the available options in the game state
+    /// based on the predefined ranking.
+    fn make_move(&self, state: &Gamestate) -> Turn {
+        if state.is_terminal() {
+            return None;
+        }
+
+        for t in &self.ranking {
+            if state.get_moves().contains(&Some(*t)) {
+                return Some(*t);
+            }
+        }
+
+        panic!("make_move passed state with no moves.");
+    }
+}
+
 /// An agent that selects a random valid move each turn.
 pub struct RandomAgent {
     r: RefCell<ThreadRng>,

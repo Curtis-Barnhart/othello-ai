@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::cmp::Ordering;
+use std::time::{Duration, Instant};
 
 use crate::agent::Agent;
 use crate::gameplay::{Gamestate, Players, States, Turn};
@@ -60,6 +61,18 @@ impl McstNode {
     /// Immutable [McstNode::total] getter.
     pub fn total(&self) -> &u32 {
         &self.total
+    }
+
+    pub fn node_count(&self) -> usize {
+        if self.children.is_empty() {
+            return 1
+        } else {
+            let mut c = 1;
+            for (_, child) in &self.children {
+                c += child.node_count();
+            }
+            c
+        }
     }
 
     /// Immutable [McstNode::children] getter.
@@ -380,4 +393,31 @@ impl<
             true
         }
     }
+}
+
+/// Benchmarks an MCTS agent by running cycles for 5 seconds and
+/// returnind the average number of nodes generated per second.
+pub fn benchmark<Sel, Exp, Dec, Roll>(
+    mut agent: McstAgent<Sel, Exp, Dec, Roll>,
+) -> usize
+where
+    Sel: SelectionPolicy,
+    Exp: ExpansionPolicy,
+    Dec: DecisionPolicy,
+    Roll: Agent,
+{
+    let start_time = Instant::now();
+    let time_limit = Duration::from_secs(5);
+
+    // Run as many cycles as possible within the time limit
+    while Instant::now() - start_time < time_limit {
+        if let Err(e) = agent.cycle() {
+            panic!("Cycle failed during benchmarking: {:?}", e);
+        }
+    }
+
+    let total_nodes = agent.tree().root().node_count();
+    let elapsed_secs = (Instant::now() - start_time).as_secs_f64();
+
+    (total_nodes as f64 / elapsed_secs).round() as usize
 }
