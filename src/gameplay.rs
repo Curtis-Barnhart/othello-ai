@@ -66,7 +66,7 @@ impl Gamestate {
     /// Returns whose turn it is.
     /// Returns [empty](States::Empty) if the game is over.
     pub fn whose_turn(&self) -> States {
-        if self.is_terminal() {
+        if self.get_moves().is_empty() {
             States::Empty
         } else {
             if self.turn & 1 == 0 {
@@ -96,9 +96,23 @@ impl Gamestate {
     /// Generates the list of valid moves for the current player.
     /// If no moves are possible, returns a list containing only [None] (pass).
     /// If the game is over, returns an empty list.
-    pub fn gen_moves(&self) -> Vec<Turn> {
-        if let States::Taken(whose) = self.whose_turn() {
-            let moves = self.board.get_moves(whose);
+    fn gen_moves(&self) -> Vec<Turn> {
+        let possible_turn = if self.turn & 1 == 0 {
+            Players::Black
+        } else {
+            Players::White
+        };
+
+        let moves = self.board.get_moves(possible_turn);
+        let is_terminal = match (moves.is_empty(), possible_turn) {
+            (false, _) => false,
+            (true, Players::Black) => self.board.get_moves(Players::White).is_empty(),
+            (true, Players::White) => self.board.get_moves(Players::Black).is_empty(),
+        };
+
+        if is_terminal {
+            Vec::new()
+        } else {
             if moves.is_empty() {
                 vec![None]
             } else {
@@ -106,18 +120,12 @@ impl Gamestate {
                     |t| { Some(t) }
                 ).collect()
             }
-        } else {
-            Vec::new()
         }
     }
 
     /// Returns `true` if the move is valid for the current player.
     pub fn valid_move(&self, m: Turn) -> bool {
-        if let States::Taken(_) = self.whose_turn() {
-            self.get_moves().contains(&m)
-        } else {
-            false
-        }
+        self.get_moves().contains(&m)
     }
 
     /// Provides a shared reference to the underlying board.
@@ -125,20 +133,6 @@ impl Gamestate {
         &self.board
     }
 
-    /// Returns [true] iff the game has ended and no players can move.
-    pub fn is_terminal(&self) -> bool {
-        let whose_turn = if self.turn & 1 == 0 {
-            Players::Black
-        } else {
-            Players::White
-        };
-        let moves = self.board.get_moves(whose_turn);
-        match (moves.is_empty(), whose_turn) {
-            (false, _) => false,
-            (true, Players::Black) => self.board.get_moves(Players::White).is_empty(),
-            (true, Players::White) => self.board.get_moves(Players::Black).is_empty(),
-        }
-    }
 
     /// Applies the given move to the game state using full flipping logic.
     /// Returns a vector of flipped positions if successful,

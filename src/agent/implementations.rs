@@ -1,10 +1,11 @@
-use rand::prelude::IndexedRandom;
-use rand::rngs::ThreadRng;
 use std::time::Instant;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::io;
+
+use rand::prelude::IndexedRandom;
+use rand::rngs::ThreadRng;
 
 use crate::agent::{Agent, MemoryAgent};
 use crate::gameplay::{Gamestate, Turn};
@@ -16,13 +17,13 @@ use crate::mcst::{McstNode, McstTree, McstAgent, SelectionPolicy, ExpansionPolic
 /// It selects the highest-ranked available move as its turn.
 pub struct RankedCellAgent {
     /// A prioritized list of cell coordinates, ordered from most to least preferred.
-    ranking: Vec<(u8, u8)>
+    ranking: [[f64; 8]; 8],
 }
 
 impl RankedCellAgent {
     /// Creates a new `RankedCellAgent` with the given cell preference ranking.
-    pub fn new(ranking: Vec<(u8, u8)>) -> Self {
-        RankedCellAgent {ranking}
+    pub fn new(ranking: [[f64; 8]; 8]) -> Self {
+        RankedCellAgent { ranking }
     }
 }
 
@@ -30,17 +31,15 @@ impl Agent for RankedCellAgent {
     /// Selects a move from the available options in the game state
     /// based on the predefined ranking.
     fn make_move(&self, state: &Gamestate) -> Turn {
-        if state.is_terminal() {
+        if state.get_moves().contains(&None) {
             return None;
         }
 
-        for t in &self.ranking {
-            if state.get_moves().contains(&Some(*t)) {
-                return Some(*t);
-            }
-        }
-
-        panic!("make_move passed state with no moves.");
+        *state.get_moves().iter().max_by(|loc1: &&Option<(u8, u8)>, loc2: &&Option<(u8, u8)>| -> Ordering {
+            let (l1x, l1y) = loc1.unwrap();
+            let (l2x, l2y) = loc2.unwrap();
+            self.ranking[l1y as usize][l1x as usize].total_cmp(&self.ranking[l2y as usize][l2x as usize])
+        }).unwrap()
     }
 }
 
@@ -88,18 +87,16 @@ impl Agent for GreedyAgent {
 }
 
 /// A human-controlled agent.
-pub struct MemoryHumanAgent {
-    game: Gamestate,
-}
+pub struct HumanAgent {}
 
-impl MemoryHumanAgent {
+impl HumanAgent {
     /// Constructs a new human agent with a fresh game state.
     pub fn new() -> Self {
-        MemoryHumanAgent { game: Gamestate::new() }
+        HumanAgent {}
     }
 }
 
-impl Agent for MemoryHumanAgent {
+impl Agent for HumanAgent {
     /// Interacts with the user to input a valid move.
     /// Panics if there are no valid moves.
     fn make_move(&self, state: &Gamestate) -> Turn {
@@ -134,25 +131,6 @@ impl Agent for MemoryHumanAgent {
                 }
             }
         }
-    }
-}
-
-impl MemoryAgent for MemoryHumanAgent {
-    /// Initializes internal game state with `state`.
-    fn initialize_game(&mut self, state: Gamestate) {
-        self.game = state;
-    }
-
-    /// Makes a move and updates the internal game state accordingly.
-    fn make_move(&mut self) -> Turn {
-        let turn = Agent::make_move(self, &self.game);
-        self.game.make_move(turn);
-        turn
-    }
-
-    /// Applies the opponent's move to the internal game state.
-    fn opponent_move(&mut self, op: &Turn) {
-        self.game.make_move(*op);
     }
 }
 
@@ -238,7 +216,7 @@ impl UctSelection {
 
     /// Recursively selects nodes from the current player's perspective using UCT.
     /// Adds moves to the path until a node with no or unexplored children is reached.
-    fn select_mine(&self, node: &McstNode, path: &mut Vec<Turn>, total: f64) {
+    fn select_mine(&self, node: &McstNode, path: &mut Vec<Turn>) {
         if node.children().len() < node.game().get_moves().len()
            || node.children().len() == 0 {
         } else {
@@ -248,18 +226,18 @@ impl UctSelection {
                     let n1t = f64::from(*n1.1.total());
                     let n2w = f64::from(*n2.1.wins());
                     let n2t = f64::from(*n2.1.total());
-                    (n1w / n1t + self.c * (total.ln() / n1w).sqrt()).total_cmp(
-                        &(n2w / n2t + self.c * (total.ln() / n2w).sqrt())
+                    (n1w / n1t + self.c * (f64::from(*node.total()).ln() / n1t).sqrt()).total_cmp(
+                        &(n2w / n2t + self.c * (f64::from(*node.total()).ln() / n2t).sqrt())
                     )
                 }
             ).expect("There were no children?");
             path.push(*new_child.0);
-            self.select_your(new_child.1, path, f64::from(*new_child.1.total()));
+            self.select_your(new_child.1, path);
         }
     }
 
     /// Recursively selects nodes from the opponent's perspective using inverted reward.
-    fn select_your(&self, node: &McstNode, path: &mut Vec<Turn>, total: f64) {
+    fn select_your(&self, node: &McstNode, path: &mut Vec<Turn>) {
         if node.children().len() < node.game().get_moves().len()
            || node.children().len() == 0 {
         } else {
@@ -269,13 +247,13 @@ impl UctSelection {
                     let n1t = f64::from(*n1.1.total());
                     let n2w = f64::from(*n2.1.wins());
                     let n2t = f64::from(*n2.1.total());
-                    (-n1w / n1t + self.c * (total.ln() / n1w).sqrt()).total_cmp(
-                        &(-n2w / n2t + self.c * (total.ln() / n2w).sqrt())
+                    (-n1w / n1t + self.c * (f64::from(*node.total()).ln() / n1t).sqrt()).total_cmp(
+                        &(-n2w / n2t + self.c * (f64::from(*node.total()).ln() / n2t).sqrt())
                     )
                 }
             ).expect("There were no children?");
             path.push(*new_child.0);
-            self.select_mine(new_child.1, path, f64::from(*new_child.1.total()));
+            self.select_mine(new_child.1, path);
         }
     }
 }
@@ -284,7 +262,7 @@ impl SelectionPolicy for UctSelection {
     /// Returns a path through the tree according to UCT-based selection.
     fn select(&mut self, tree: &McstTree) -> Option<Vec<Turn>> {
         let mut turns: Vec<Turn> = Vec::new();
-        self.select_mine(tree.root(), &mut turns, tree.root().game().get_moves().len() as f64);
+        self.select_mine(tree.root(), &mut turns);
         Some(turns)
     }
 }
@@ -339,7 +317,13 @@ impl SelectionPolicy for BfsSelectionFast {
     }
 
     /// Resets the BFS queue at the start of a new turn.
-    fn turns_passed(&mut self, _tree: &McstTree, _turns: (Turn, Turn)) {
+    fn turns_passed(&mut self, _tree: &McstTree) {
+        self.queue.clear();
+        self.queue.push_back(Vec::new());
+    }
+
+    /// Resets the BFS queue.
+    fn set_state(&mut self, _state: Gamestate) {
         self.queue.clear();
         self.queue.push_back(Vec::new());
     }
@@ -399,52 +383,43 @@ impl DecisionPolicy for WinAverageDecision  {
     }
 }
 
-/// An MCTS agent that uses BFS selection and win-average decision-making,
-/// with memory of previous moves.
-pub struct BfsMemoryAgent {
-    agent: McstAgent<
-        BfsSelectionFast,
-        BfsExpansion,
-        WinAverageDecision,
-        RandomAgent,
-    >,
+pub struct McstMemoryAgent<S: SelectionPolicy, E: ExpansionPolicy, D: DecisionPolicy, A: Agent> {
+    agent: McstAgent<S, E, D, A>,
     compute_time: u128,
-    last_move: Turn,
+    last_turn: Turn,
 }
 
-impl BfsMemoryAgent {
-    /// Creates a new BFS-based agent with the given computation time budget (in centiseconds).
-    pub fn new(compute_time: u128) -> Self {
-        BfsMemoryAgent {
-            agent: McstAgent::new(
-            BfsSelectionFast::new(),
-            BfsExpansion {},
-            WinAverageDecision {},
-            RandomAgent::new(),
-            RandomAgent::new(),
-            Gamestate::new(),
-            ),
-            compute_time: compute_time,
-            last_move: None,
+impl<S, E, D, A> McstMemoryAgent<S, E, D, A>
+where
+    S: SelectionPolicy,
+    E: ExpansionPolicy,
+    D: DecisionPolicy,
+    A: Agent,
+{
+    pub fn new(agent: McstAgent<S, E, D, A>, compute_time: u128) -> Self {
+        Self {
+            agent,
+            compute_time,
+            last_turn: None
         }
     }
+
+    pub fn agent(&self) -> &McstAgent<S, E, D, A> {
+        &self.agent
+    }
 }
 
-impl MemoryAgent for BfsMemoryAgent {
-    /// Initializes the agent with a new game state.
+impl<S, E, D, A> MemoryAgent for McstMemoryAgent<S, E, D, A>
+where
+    S: SelectionPolicy,
+    E: ExpansionPolicy,
+    D: DecisionPolicy,
+    A: Agent,
+{
     fn initialize_game(&mut self, state: Gamestate) {
-        self.agent = McstAgent::new(
-        BfsSelectionFast::new(),
-        BfsExpansion {},
-        WinAverageDecision {},
-        RandomAgent::new(),
-        RandomAgent::new(),
-        state,
-        )
+        self.agent.set_state(state);
     }
 
-    /// Performs MCTS cycles until the time limit is reached,
-    /// then returns the selected move.
     fn make_move(&mut self) -> Turn {
         let time_0 = Instant::now();
         let mut hundreths: u128 = 0;
@@ -477,99 +452,11 @@ impl MemoryAgent for BfsMemoryAgent {
             _ => panic!("Decision could not be made"),
         };
 
-        self.last_move = decision;
+        self.last_turn = decision;
         decision
     }
 
-    /// Updates the internal game state with the opponent's move.
     fn opponent_move(&mut self, op: &Turn) {
-        self.agent.next_two_moves(self.last_move, *op);
-    }
-}
-
-/// An MCTS agent that uses UCT selection and total-count-based decision-making.
-pub struct UctMemoryAgent {
-    agent: McstAgent<
-        UctSelection,
-        BfsExpansion,
-        UctDecision,
-        RandomAgent,
-    >,
-    compute_time: u128,
-    last_move: Turn,
-}
-
-impl UctMemoryAgent {
-    /// Creates a new UCT-based agent with a given computation time and UCT exploration constant.
-    pub fn new(compute_time: u128, learn_rate: f64) -> Self {
-        UctMemoryAgent {
-            agent: McstAgent::new(
-            UctSelection::new(learn_rate),
-            BfsExpansion {},
-            UctDecision {},
-            RandomAgent::new(),
-            RandomAgent::new(),
-            Gamestate::new(),
-            ),
-            compute_time: compute_time,
-            last_move: None,
-        }
-    }
-}
-
-impl MemoryAgent for UctMemoryAgent {
-    /// Initializes the agent with a new game state.
-    fn initialize_game(&mut self, state: Gamestate) {
-        self.agent = McstAgent::new(
-        UctSelection::new(2_f64.sqrt()),
-        BfsExpansion {},
-        UctDecision {},
-        RandomAgent::new(),
-        RandomAgent::new(),
-        state,
-        )
-    }
-
-    /// Performs MCTS cycles until the time limit is reached,
-    /// then returns the selected move.
-    fn make_move(&mut self) -> Turn {
-        let time_0 = Instant::now();
-        let mut hundreths: u128 = 0;
-        loop {
-            match self.agent.cycle() {
-                Ok(continuing) => {
-                    if !continuing {
-                        break;
-                    } else {
-                        let delta = time_0.elapsed().as_millis() / 10;
-                        if delta >= hundreths {
-                            hundreths = delta;
-                            if hundreths > self.compute_time {
-                                break;
-                            }
-                        }
-                    }
-                }
-                Err(e) => { panic!("errored on {:?}", e) },
-            };
-        }
-
-        let decision = match self.agent.decide() {
-            Some(Some(loc)) => {
-                Some(loc)
-            },
-            Some(Option::None) => {
-                None
-            }
-            _ => panic!("Decision could not be made"),
-        };
-
-        self.last_move = decision;
-        decision
-    }
-
-    /// Updates the internal game state with the opponent's move.
-    fn opponent_move(&mut self, op: &Turn) {
-        self.agent.next_two_moves(self.last_move, *op);
+        self.agent.next_two_moves(self.last_turn, *op);
     }
 }

@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::cmp::Ordering;
 use std::time::{Duration, Instant};
 
+use rand::seq::IndexedRandom;
+
 use crate::agent::Agent;
 use crate::gameplay::{Gamestate, Players, States, Turn};
 
@@ -10,7 +12,13 @@ pub trait SelectionPolicy {
     /// Select a path through the tree to expand or evaluate.
     fn select(&mut self, tree: &McstTree) -> Option<Vec<Turn>>;
     /// Inform the selector of the two most recent moves.
-    fn turns_passed(&mut self, tree: &McstTree, turns: (Turn, Turn)) {}
+    /// This is here because [crate::agent::implementations::BfsSelectionFast] 
+    /// is stateful and needs to know when stuff got changed.
+    fn turns_passed(&mut self, tree: &McstTree) {}
+    /// Resets to a certain state.
+    /// This is here because [crate::agent::implementations::BfsSelectionFast] 
+    /// is stateful and needs to know when to reset it.
+    fn set_state(&mut self, state: Gamestate) {}
 }
 
 /// A trait for defining how the tree expands new nodes.
@@ -54,24 +62,30 @@ impl McstNode {
     }
 
     /// Immutable [McstNode::wins] getter.
+    /// TODO: just return the number?
     pub fn wins(&self) -> &u32 {
         &self.wins
     }
 
     /// Immutable [McstNode::total] getter.
+    /// TODO: just return the number?
     pub fn total(&self) -> &u32 {
         &self.total
     }
 
+    /// Count the number of nodes (plus itself) that descend from this one.
     pub fn node_count(&self) -> usize {
-        if self.children.is_empty() {
-            return 1
+        1 + self.children.values().map(Self::node_count).sum::<usize>()
+    }
+
+    pub fn tree_filledness(&self, data: &mut Vec<usize>, root: usize) {
+        if data.len() <= root {
+            data.push(1);
         } else {
-            let mut c = 1;
-            for (_, child) in &self.children {
-                c += child.node_count();
-            }
-            c
+            data[root] += 1;
+        }
+        for child in self.children.values() {
+            child.tree_filledness(data, root + 1);
         }
     }
 
@@ -217,6 +231,11 @@ impl<
         }
     }
 
+    pub fn set_state(&mut self, state: Gamestate) {
+        self.selector.set_state(state.clone());
+        self.tree = McstTree::new(state);
+    }
+
     /// Immutable [McstAgent::tree] getter.
     pub fn tree(&self) -> &McstTree {
         &self.tree
@@ -269,7 +288,7 @@ impl<
         };
 
         loop {
-            if !game.is_terminal() {
+            if !game.get_moves().is_empty() {
                 let player_move = if my_turn {
                     self.rollout.make_move(&game)
                 } else {
@@ -303,7 +322,7 @@ impl<
             Ok(Option::None) => return Ok(false),
         };
 
-        if !self.node_from_path(&path).game.is_terminal() {
+        if !self.node_from_path(&path).game.get_moves().is_empty() {
             match self.expand(&path) { // won't panic because path is validated above
                 Err(e) => return Err(CycleError::Expansion(e)),
                 Ok(expansion) => {
@@ -318,6 +337,7 @@ impl<
             Ok(win) => win,
         };
 
+        // TODO: should it be ..(index + 1)?
         for index in 0..=path.len() {
             self.node_from_path_mut(&path[..index])
                 .update(win);
@@ -389,7 +409,7 @@ impl<
                                  .remove(&mv2)
                                  .unwrap();
 
-            self.selector.turns_passed(&self.tree,  (mv1, mv2));
+            self.selector.turns_passed(&self.tree);
             true
         }
     }
