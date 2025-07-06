@@ -54,20 +54,38 @@ impl<A: Agent> MemoryAgent for MemorifiedAgent<A> {
     }
 }
 
-pub fn play_memory_agents
+/// agent1 will always take the first turn from the current state,
+/// regardless of if that turn is Black's or White's.
+pub fn play_memory_agents_from
 <A1: MemoryAgent, A2: MemoryAgent>
-(agent1: &mut A1, agent2: &mut A2) -> (i8, Vec<Turn>) {
+(agent_black: &mut A1, agent_white: &mut A2, mut game: Gamestate) -> (i8, Vec<Turn>) {
     let mut history: Vec<Turn> = Vec::new();
-    let mut game = Gamestate::new();
-    agent1.initialize_game(game.clone());
+    let black_first = match game.whose_turn() {
+        States::Empty => return (game.score(), Vec::new()),
+        States::Taken(Players::Black) => true,
+        States::Taken(Players::White) => false,
+    };
 
-    let first_move = agent1.make_move();
-    history.push(first_move);
-    if !game.make_move_fast(first_move) {
-        panic!("illegal move");
+    match black_first {
+        true => {
+            agent_black.initialize_game(game.clone());
+            let first_move = agent_black.make_move();
+            history.push(first_move);
+            if !game.make_move_fast(first_move) {
+                panic!("illegal move");
+            }
+            agent_white.initialize_game(game.clone());
+        }
+        false => {
+            agent_white.initialize_game(game.clone());
+            let first_move = agent_white.make_move();
+            history.push(first_move);
+            if !game.make_move_fast(first_move) {
+                panic!("illegal move");
+            }
+            agent_black.initialize_game(game.clone());
+        }
     }
-
-    agent2.initialize_game(game.clone());
 
     loop {
         let valid_moves = game.get_moves();
@@ -76,20 +94,26 @@ pub fn play_memory_agents
         }
 
         let player_move = match game.whose_turn() {
-            States::Taken(Players::Black) => agent1.make_move(),
-            States::Taken(Players::White) => agent2.make_move(),
+            States::Taken(Players::Black) => agent_black.make_move(),
+            States::Taken(Players::White) => agent_white.make_move(),
             _ => panic!("game should not be over"),
         };
         if !game.make_move_fast(player_move) {
-            panic!("illegal move");
+            panic!("illegal move {:?} on game \n{game}\n.", player_move);
         }
         history.push(player_move);
-        match game.whose_turn() {
-            States::Taken(Players::Black) => agent1.opponent_move(&player_move),
-            States::Taken(Players::White) => agent2.opponent_move(&player_move),
+        match game.whose_turn() { // whose turn has just been updated
+            States::Taken(Players::Black) => agent_black.opponent_move(&player_move),
+            States::Taken(Players::White) => agent_white.opponent_move(&player_move),
             _ => (),
         };
     }
+}
+
+pub fn play_memory_agents
+<A1: MemoryAgent, A2: MemoryAgent>
+(agent1: &mut A1, agent2: &mut A2) -> (i8, Vec<Turn>) {
+    play_memory_agents_from(agent1, agent2, Gamestate::new())
 }
 
 pub fn benchmark_memory_agents
