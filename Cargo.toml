@@ -2,6 +2,10 @@
 name = "othello"
 version = "0.1.0"
 edition = "2024"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 rand = "0.9.1"
+burn = { version = "~0.17", features = ["train", "wgpu"] }
+csv = "1.3.1"
+magpie = "0.11.2"
