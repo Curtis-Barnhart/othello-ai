@@ -24,7 +24,7 @@ pub enum States {
 }
 
 /// Represents the game board: an 8x8 grid of tile states.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Board {
     /// 8x8 grid of tile states.
     pub pieces: [[States; 8]; 8],
@@ -248,6 +248,112 @@ impl Board {
             any
         } else {
             false
+        }
+    }
+
+    /// Rotates the board 90 degrees clockwise.
+    pub fn rotate_90(&mut self) {
+        let mut new_pieces = [[States::Empty; 8]; 8];
+
+        for i in 0..8 {
+            for j in 0..8 {
+                new_pieces[j][7 - i] = self.pieces[i][j].clone();
+            }
+        }
+
+        self.pieces = new_pieces;
+    }
+
+    /// Flips the colors of all taken tiles (Black ↔ White).
+    pub fn flip_colors(&mut self) {
+        for row in self.pieces.iter_mut() {
+            for state in row.iter_mut() {
+                *state = match state {
+                    States::Taken(Players::Black) => States::Taken(Players::White),
+                    States::Taken(Players::White) => States::Taken(Players::Black),
+                    States::Empty => States::Empty,
+                };
+            }
+        }
+    }
+
+    /// Compact form of gamestate data
+    pub fn to_compact(&self) -> u128 {
+        let mut exp = 0;
+        let mut acc: u128 = 0;
+        for x in 0..8 {
+            for y in 0..8 {
+                acc += (match self.at(x, y).unwrap() {
+                    States::Empty => 0,
+                    States::Taken(Players::Black) => 1,
+                    States::Taken(Players::White) => 2,
+                }) * 3_u128.pow(exp);
+                exp += 1;
+            }
+        }
+        acc
+    }
+
+    pub fn from_compact(mut compact: u128) -> Self {
+        let mut b = Board::new();
+
+        for x in 0..8 {
+            for y in 0..8 {
+                let remainder = compact % 3;
+                compact = compact / 3;
+                b.change(x, y,
+                    match remainder {
+                        0 => States::Empty,
+                        1 => States::Taken(Players::Black),
+                        2 => States::Taken(Players::White),
+                        _ => panic!(""),
+                    }
+                );
+            }
+        }
+        b
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rotate_90() {
+        let mut board = Board::new();
+
+        board.pieces[0][1] = States::Taken(Players::Black);
+        board.pieces[1][1] = States::Taken(Players::White);
+        board.pieces[7][7] = States::Taken(Players::Black);
+        board.rotate_90();
+
+        assert_eq!(board.pieces[1][7], States::Taken(Players::Black));
+        assert_eq!(board.pieces[1][6], States::Taken(Players::White));
+        assert_eq!(board.pieces[7][0], States::Taken(Players::Black));
+    }
+
+    #[test]
+    fn test_flip_colors() {
+        let mut board = Board::new();
+
+        // Place a few colored tiles
+        board.pieces[2][3] = States::Taken(Players::Black);
+        board.pieces[4][4] = States::Taken(Players::White);
+        board.pieces[7][7] = States::Taken(Players::Black);
+
+        board.flip_colors();
+
+        assert_eq!(board.pieces[2][3], States::Taken(Players::White));
+        assert_eq!(board.pieces[4][4], States::Taken(Players::Black));
+        assert_eq!(board.pieces[7][7], States::Taken(Players::White));
+    }
+
+    #[test]
+    fn test_compact() {
+        for compact in [0, 18273465, 2192384765, 1982736452134, 91278365417926354197236812] {
+            assert_eq!(compact, Board::from_compact(compact).to_compact());
         }
     }
 }

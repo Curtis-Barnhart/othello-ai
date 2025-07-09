@@ -10,8 +10,8 @@ pub type Turn = Option<(u8, u8)>;
 
 /// A representation of the game state, including the board, turn number,
 /// and cached list of valid moves for the current player.
-// TODO: hey make it so that when it clones it keeps the turn list
-#[derive(Clone)]
+// TODO: hey make it so that when it clones it keeps the turn list (if it doesn't already?)
+#[derive(Clone, Debug, PartialEq)]
 pub struct Gamestate {
     board: Board,
     turn: u8,
@@ -55,7 +55,7 @@ impl Gamestate {
 
     /// Constructs a game state with a given board and turn value.
     /// Useful for testing or simulation purposes.
-    pub fn new_mock(board: Board, turn: u8) -> Self {
+    pub fn new_from(board: Board, turn: u8) -> Self {
         Gamestate {
             board: board,
             turn: turn,
@@ -133,7 +133,6 @@ impl Gamestate {
         &self.board
     }
 
-
     /// Applies the given move to the game state using full flipping logic.
     /// Returns a vector of flipped positions if successful,
     /// or [None] if invalid or game is over.
@@ -158,6 +157,7 @@ impl Gamestate {
     /// Applies the given move to the game state using full flipping logic.
     /// Unlike [Gamestate::make_move], does not return the list of flipped
     /// tiles.
+    /// If the move does not go through, maintains original board state.
     ///
     /// Returns [true} if the move was valid and applied, [false] otherwise.
     pub fn make_move_fast(&mut self, turn: Turn) -> bool {
@@ -187,29 +187,18 @@ impl Gamestate {
     }
 }
 
-/// Converts a string matching" *\d *, *\d *" into a `Turn` type.
+/// Converts a string matching " *\d *, *\d *" into a tuple of ints.
+/// Does check that they are less than 8.
 ///
-/// Attempts to parse two [u8] integers.
 /// Returns [None] if parsing fails or the format is incorrect.
 pub fn str_to_loc(s: &str) -> Option<(u8, u8)> {
     let stripped = s.replace(" ", "");
     let mut iter = stripped.split(",");
     if let (Some(x), Some(y)) = (iter.next(), iter.next()) {
         if let (Ok(x), Ok(y)) = (x.parse::<u8>(), y.parse::<u8>()) {
-            Some((x, y))
+            if x < 8 && y < 8 {
+                Some((x, y))
+            } else { None }
         } else { None }
     } else { None }
-}
-
-/// Converts a list of turns to a String representing them.
-pub fn turns_to_str(turns: &[Turn]) -> String {
-    turns.iter().map(
-        |t: &Turn| -> String {
-            if let Some((x, y)) = t {
-                format!("{x},{y}")
-            } else {
-                String::from("")
-            }
-        }
-    ).collect::<Vec<String>>().join(";")
 }

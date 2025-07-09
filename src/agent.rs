@@ -20,6 +20,9 @@ pub trait MemoryAgent {
     fn make_move(&mut self) -> Turn;
 }
 
+/// A MemorifiedAgent is a wrapper that turns any [Agent] into a [MemoryAgent].
+/// It does this simply by remembering the turns that have passed in the wrapper
+/// and invoking the underlying [Agent] whenever necessary.
 pub struct MemorifiedAgent<A: Agent> { 
     memory: Gamestate,
     agent: A,
@@ -54,8 +57,6 @@ impl<A: Agent> MemoryAgent for MemorifiedAgent<A> {
     }
 }
 
-/// agent1 will always take the first turn from the current state,
-/// regardless of if that turn is Black's or White's.
 pub fn play_memory_agents_from
 <A1: MemoryAgent, A2: MemoryAgent>
 (agent_black: &mut A1, agent_white: &mut A2, mut game: Gamestate) -> (i8, Vec<Turn>) {

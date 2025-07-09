@@ -352,6 +352,8 @@ impl<
     pub fn decide(&mut self) -> Option<Turn> {
         let decision = self.decider.decide(&self.tree);
         if self.tree.root.game.valid_move(decision) {
+            let child = &self.tree.root.children[&decision];
+            //println!("Chosen move at game \n{}\n wins {}/{} playouts",self.tree.root.game, child.wins(), child.total());
             Some(decision)
         } else {
             None
