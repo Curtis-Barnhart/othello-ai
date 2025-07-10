@@ -1,5 +1,5 @@
 use burn::{
-    data::{dataloader::DataLoaderBuilder, dataset::InMemDataset},
+    data::{dataloader::DataLoaderBuilder},
     nn::{loss::MseLoss, Dropout, DropoutConfig, Linear, LinearConfig, Relu},
     optim::AdamConfig,
     prelude::*,
@@ -11,7 +11,10 @@ use burn::{
     }
 };
 
-use super::data::{DataBatch, DataBatcher};
+use super::{
+    data::{DataBatch, DataBatcher},
+    create_artifact_dir,  get_train_data, get_validation_data, StaticNeuralEval
+};
 
 #[derive(Config, Debug)]
 pub struct ModelConfig {
@@ -24,12 +27,10 @@ impl ModelConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> Model<B> {
         Model {
             dropout: DropoutConfig::new(self.dropout).init(),
-            linear1: LinearConfig::new(64 * 3, 2048).init(device),
-            linear2: LinearConfig::new(2048, 2048).init(device),
-            linear3: LinearConfig::new(2048, 2048).init(device),
-            linear4: LinearConfig::new(2048, 2048).init(device),
-//            linear5: LinearConfig::new(2048, 2048).init(device),
-//            linear6: LinearConfig::new(2048, 2048).init(device),
+            linear1: LinearConfig::new(64 * 3, 100).init(device),
+            linear2: LinearConfig::new(100, 100).init(device),
+            linear3: LinearConfig::new(100, 100).init(device),
+            linear4: LinearConfig::new(100, 100).init(device),
             activation: Relu::new(),
         }
     }
@@ -42,8 +43,6 @@ pub struct Model<B: Backend> {
     linear2: Linear<B>,
     linear3: Linear<B>,
     linear4: Linear<B>,
-//    linear5: Linear<B>,
-//    linear6: Linear<B>,
     activation: Relu,
 }
 
@@ -67,13 +66,6 @@ impl<B: Backend> Model<B> {
         let x = self.linear4.forward(x);
         let x = self.dropout.forward(x);
 
-//        let x = self.activation.forward(x);
-//        let x = self.linear5.forward(x);
-//        let x = self.dropout.forward(x);
-//
-//        let x = self.activation.forward(x);
-//        let x = self.linear6.forward(x);
-//        let x = self.dropout.forward(x);
         x
     }
 
@@ -88,6 +80,20 @@ impl<B: Backend> Model<B> {
 
         RegressionOutput::new(loss, output, targets)
     }
+}
+
+impl<Be: Backend> StaticNeuralEval for Model<Be> {
+    type B = Be;
+
+    fn eval(&self, tensor: Tensor<Be, 1>) -> f32 {
+        let result = self.forward(tensor.reshape([1, 3 * 64]));
+        result.to_data().to_vec().unwrap()[0]
+    }
+
+//    fn eval(&self, state: &Gamestate, device: &<<Self as StaticNeuralEval>::B as Backend>::Device) -> f64 {
+//        let result = self.forward(compact_to_tensor::<Be>(state.board().to_compact(), device).reshape([1, 3 * 64]));
+//        result.to_data().to_vec().unwrap()[0]
+//    }
 }
 
 impl<B: AutodiffBackend> TrainStep<DataBatch<B>, RegressionOutput<B>> for Model<B> {
@@ -118,20 +124,6 @@ pub struct TrainingConfig {
     pub seed: u64,
     #[config(default = 1.0e-4)]
     pub learning_rate: f64,
-}
-
-fn create_artifact_dir(artifact_dir: &str) {
-    // Remove existing artifacts before to get an accurate learner summary
-    std::fs::remove_dir_all(artifact_dir).ok();
-    std::fs::create_dir_all(artifact_dir).ok();
-}
-
-fn get_train_data() -> InMemDataset<(u128, f32)> {
-    InMemDataset::<(u128, f32)>::from_csv("train.csv", &csv::ReaderBuilder::new()).unwrap()
-}
-
-fn get_validation_data() -> InMemDataset<(u128, f32)> {
-    InMemDataset::<(u128, f32)>::from_csv("valid.csv", &csv::ReaderBuilder::new()).unwrap()
 }
 
 pub fn train<B: AutodiffBackend>(artifact_dir: &str, config: TrainingConfig, device: B::Device) {

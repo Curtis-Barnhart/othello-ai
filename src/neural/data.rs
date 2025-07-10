@@ -12,7 +12,7 @@ pub struct DataBatch<B: Backend> {
     pub targets: Tensor<B, 2, Float>,
 }
 
-fn compact_to_tensor<B: Backend>(mut compact: u128, device: &B::Device) -> Tensor<B, 1> {
+pub fn compact_to_tensor<B: Backend>(mut compact: u128, device: &B::Device) -> Tensor<B, 1> {
     let mut v = [false; 64 * 3];
     for x in 0..8 {
         for y in 0..8 {

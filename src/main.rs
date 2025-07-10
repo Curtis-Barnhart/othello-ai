@@ -14,17 +14,17 @@ use std::env;
 use burn::backend::{Autodiff, Wgpu};
 use burn::optim::AdamConfig;
 
-use agent::{play_memory_agents, play_memory_agents_from};
-use agent::implementations::{BfsExpansion, McstMemoryAgent, RandomAgent, UctDecision, UctSelection};
+use agent::{benchmark_memory_agents, play_memory_agents, play_memory_agents_from, MemorifiedAgent};
+use agent::implementations::{BfsExpansion, HumanAgent, McstMemoryAgent, RandomAgent, UctDecision, UctSelection};
 use gameplay::{Gamestate, Players, States};
 use mcst::{benchmark, McstAgent};
 use data::{collect_mcst_data, turns_to_str, BfsAllGamestates};
 
 use neural::model_a;
 use neural::model_b;
+use rand::rand_core::impls::next_u64_via_u32;
 
 fn main() {
-    let artifact_dir = &env::args().collect::<Vec<String>>()[1];
 
 //    loop {
 //        collect_mcst_data();
@@ -45,6 +45,15 @@ fn main() {
     type MyAutodiffBackend = Autodiff<MyBackend>;
 
     let device = burn::backend::wgpu::WgpuDevice::default();
+    let model: model_a::Model<MyBackend> = model_a::ModelConfig::new().init(&device);
+    let ma = neural::ModuleAgent::new(model, device);
+    let mut memorified_ma = MemorifiedAgent::new(ma);
+    let wins = benchmark_memory_agents(&mut memorified_ma, &mut MemorifiedAgent::new(RandomAgent::new()), 100);
+    println!("{wins}");
+
+    return;
+
+    let artifact_dir = &env::args().collect::<Vec<String>>()[1];
     model_a::train::<MyAutodiffBackend>(
         artifact_dir,
         model_a::TrainingConfig::new(model_a::ModelConfig::new(), AdamConfig::new()),
